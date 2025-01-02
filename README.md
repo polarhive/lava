@@ -23,7 +23,7 @@ Rename the sample `.env.example` to `.env` and set your environment variables:
 ```sh
 VAULT=vault
 CLIPPING_DIR=Clippings
-LINKS_FILE=bookmarks.md
+LINKS_FILE=vault/bookmarks.md
 ```
 
 ## Usage
