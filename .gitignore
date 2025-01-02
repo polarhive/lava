@@ -1,0 +1,6 @@
+*.txt
+.env
+content
+node_modules
+pnpm-lock.yaml
+vault
