@@ -36,13 +36,19 @@ require("dotenv").config(); // Load environment variables from .env file
     const page = await browser.newPage();
 
     for (let i = 0; i < links.length; i++) {
-      const link = links[i].trim();
+      let link = links[i].trim();
 
-      // Check if the link is already processed
+      // Skip if the link is already processed (starts with "- [x]")
       if (link.startsWith("- [x]")) {
         console.log(`Skipping already visited link: ${link}`);
         continue;
       }
+
+      // Remove the leading "- [ ]" or "- " (checkbox and hyphen) to get the URL
+      link = link
+        .replace(/^-\s*\[([x\s])\]\s*/, "")
+        .replace(/^-\s*/, "")
+        .trim();
 
       try {
         console.log(`Processing link: ${link}`);
@@ -125,15 +131,15 @@ require("dotenv").config(); // Load environment variables from .env file
         fs.writeFileSync(filePath, result.fileContent, "utf-8");
         console.log(`Saved: ${filePath}`);
 
-        // with the checkbox
+        // After processing, update the link with a checked checkbox
         const updatedLinks = links.map((linkLine) => {
-          if (linkLine.trim() === link) {
-            return `- [x] ${link}`;
+          if (linkLine.trim() === links[i].trim()) {
+            return `- [x] ${link}`; // Mark the link as processed
           }
           return linkLine;
         });
 
-        // updated links back to bookmarks.md
+        // Write the updated links back to bookmarks.md
         fs.writeFileSync(linksFile, updatedLinks.join("\n"), "utf-8");
         console.log(`Updated ${link} in bookmarks.md`);
       } catch (error) {
