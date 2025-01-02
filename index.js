@@ -15,9 +15,17 @@ require("dotenv").config(); // Load environment variables from .env file
     process.exit(1);
   }
 
+  let isProcessing = false;
+
   // Watch for changes in the bookmarks file
   chokidar.watch(linksFile, { persistent: true }).on("change", async () => {
+    if (isProcessing) {
+      console.log("Currently processing links. Skipping this change.");
+      return;
+    }
+
     console.log("Detected changes in bookmarks.md. Processing...");
+    isProcessing = true;
 
     const links = fs
       .readFileSync(linksFile, "utf-8")
@@ -25,6 +33,7 @@ require("dotenv").config(); // Load environment variables from .env file
       .filter((link) => link.trim() !== "");
     if (links.length === 0) {
       console.error(`No valid links found in "${linksFile}".`);
+      isProcessing = false;
       return;
     }
 
@@ -151,5 +160,7 @@ require("dotenv").config(); // Load environment variables from .env file
 
     await browser.close();
     console.log("All links processed.");
+
+    isProcessing = false;
   });
 })();
