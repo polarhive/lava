@@ -44,6 +44,7 @@ require("dotenv").config(); // Load environment variables from .env file
     const browser = await puppeteer.launch({ headless: true });
     const page = await browser.newPage();
 
+    let updatedLinks = [...links];
     for (let i = 0; i < links.length; i++) {
       let link = links[i].trim();
 
@@ -140,23 +141,23 @@ require("dotenv").config(); // Load environment variables from .env file
         fs.writeFileSync(filePath, result.fileContent, "utf-8");
         console.log(`Saved: ${filePath}`);
 
-        // After processing, update the link with a checked checkbox
-        const updatedLinks = links.map((linkLine) => {
-          if (linkLine.trim() === links[i].trim()) {
+        updatedLinks = updatedLinks.map((linkLine, idx) => {
+          if (idx === i && linkLine.trim() === links[i].trim()) {
             return `- [x] ${link}`; // Mark the link as processed
           }
           return linkLine;
         });
 
-        // Write the updated links back to bookmarks.md
-        fs.writeFileSync(linksFile, updatedLinks.join("\n"), "utf-8");
-        console.log(`Updated ${link} in bookmarks.md`);
       } catch (error) {
         console.error(
           `Failed to process link: ${link}. Error: ${error.message}`,
         );
       }
     }
+
+    // Write the updated links back to bookmarks.md after processing all links
+    fs.writeFileSync(linksFile, updatedLinks.join("\n"), "utf-8");
+    console.log("Updated bookmarks.md with processed links.");
 
     await browser.close();
     console.log("All links processed.");
