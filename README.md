@@ -1,19 +1,20 @@
 # lava
 
-lava is a daemon that seamlessly watches a file: **bookmarks.md** for new
-links and populates your **Obsidian clippings** directory with fresh content.
+lava is a daemon that monitors a file within your vault for new links and
+automatically populates your Obsidian clippings directory with fresh content.
 
 ## Prerequisites
 
-- VPS or PC capable of running
-- `node` and `pnpm`
+- VPS or PC capable of running `node`
+- An Obsidian vault with a .md file containing links
 
-## Installation
+## Setup
 
 ```sh
-cd vault/.. # one level above where your vault is located
-git clone https://github.com/polarhive/lava; cd lava
-pnpm i
+git clone --depth=1 https://github.com/polarhive/lava
+cd lava; npm i
+ln -s /path/to/vault vault -f; # symlink from lava/vault
+npx puppeteer browsers install chrome-headless-shell
 ```
 
 ## Configuration
@@ -28,13 +29,14 @@ LINKS_FILE=vault/bookmarks.md
 
 ## Usage
 
-The usage is pretty much automated. Just add a new link to your **bookmarks.md** file
-from any of your devices and lava will take care of the rest. (Assuming you have setup
-your vault to sync ref: [remotely](https://polarhive.net/blog/obsidian) to the VPS or
-server where the lava daemon is running).
+The process is mostly automated. Simply add a new link to your bookmarks.md
+file from any device, and lava will handle the rest. (This assumes you've set
+up your vault to sync with the VPS or PC running the lava daemon).
+
+ref: [remotely](https://polarhive.net/blog/obsidian)
 
 ```sh
-pnpm exec node index.js
+node index.js
 ```
 
 A new file will be created in your **Obsidian clippings** directory with the title of the link.
@@ -43,3 +45,4 @@ A new file will be created in your **Obsidian clippings** directory with the tit
 
 - MIT 2025. Nathan Matthew Paul
 - MIT 2024. Obsidian [clipper bookmarklet](https://gist.github.com/kepano/90c05f162c37cf730abb8ff027987ca3)
+

@@ -10,6 +10,11 @@ require("dotenv").config(); // Load environment variables from .env file
   const linksFile = process.env.LINKS_FILE;
   const outputFolder = path.join(__dirname, vault);
 
+  console.log(`Watching: ${linksFile}`);
+  console.log(
+    `Clippings will be saved to: ${path.join(outputFolder, clippingDir)}`,
+  );
+
   if (!fs.existsSync(linksFile)) {
     console.error(`File "${linksFile}" not found.`);
     process.exit(1);
@@ -41,7 +46,10 @@ require("dotenv").config(); // Load environment variables from .env file
       fs.mkdirSync(outputFolder, { recursive: true });
     }
 
-    const browser = await puppeteer.launch({ headless: true });
+    const browser = await puppeteer.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"], // fix for ubuntu VPS
+    });
     const page = await browser.newPage();
 
     let updatedLinks = [...links];
@@ -126,6 +134,7 @@ require("dotenv").config(); // Load environment variables from .env file
               `clipped: ${today}\n` +
               `tags: [${tags}]\n` +
               "---\n\n" +
+              `# ${title}\n\n` +
               markdownBody;
 
             resolve({ fileName, fileContent });
@@ -139,7 +148,6 @@ require("dotenv").config(); // Load environment variables from .env file
           fs.mkdirSync(dir, { recursive: true });
         }
         fs.writeFileSync(filePath, result.fileContent, "utf-8");
-        console.log(`Saved: ${filePath}`);
 
         updatedLinks = updatedLinks.map((linkLine, idx) => {
           if (idx === i && linkLine.trim() === links[i].trim()) {
@@ -147,7 +155,6 @@ require("dotenv").config(); // Load environment variables from .env file
           }
           return linkLine;
         });
-
       } catch (error) {
         console.error(
           `Failed to process link: ${link}. Error: ${error.message}`,
