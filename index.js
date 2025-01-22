@@ -4,7 +4,7 @@ const path = require("path");
 const chokidar = require("chokidar");
 require("dotenv").config();
 
-let isProcessing = false; 
+let isProcessing = false;
 
 (async () => {
   const vault = process.env.VAULT;
@@ -25,12 +25,11 @@ let isProcessing = false;
 
   const processLinks = async () => {
     if (isProcessing) {
-      console.log("Processing already in progress. Skipping this cycle.");
+      console.log("Skipping! duplicate cycle.");
       return;
     }
 
     isProcessing = true;
-    console.log("Processing links...");
 
     const links = fs
       .readFileSync(linksFile, "utf-8")
@@ -48,13 +47,13 @@ let isProcessing = false;
       let line = links[i].trim();
 
       if (line.startsWith("- [x]")) {
-        console.log(`Skipping already processed: ${line}`);
+        console.log(`Skipping! already processed: ${line}`);
         continue;
       }
 
       let task = sanitizeLink(line);
       if (!isValidHttpLink(task)) {
-        console.log(`Skipping non-URL task: ${task}`);
+        console.log(`Skipping! non-URL task: ${task}`);
         continue;
       }
 
@@ -62,7 +61,6 @@ let isProcessing = false;
         console.log(`Processing link: ${task}`);
         await page.goto(task, { waitUntil: "domcontentloaded", timeout: 30000 });
 
-        // clipper logic
         const result = await page.evaluate(() => {
           return new Promise(async (resolve, reject) => {
             try {
@@ -104,7 +102,6 @@ let isProcessing = false;
           });
         });
 
-        // save file locally
         const filePath = path.join(outputFolder, clippingDir, result.fileName);
         const dir = path.dirname(filePath);
         if (!fs.existsSync(dir)) {
@@ -112,7 +109,6 @@ let isProcessing = false;
         }
         fs.writeFileSync(filePath, result.fileContent, "utf-8");
 
-        console.log(`Saved clipping: ${filePath}`);
         updatedLinks[i] = `- [x] ${task}`;
       } catch (error) {
         console.error(`Failed to process link: ${task}. Error: ${error.message}`);
@@ -122,11 +118,9 @@ let isProcessing = false;
     fs.writeFileSync(linksFile, updatedLinks.join("\n"), "utf-8");
     await browser.close();
     console.log("All links processed.");
-
     isProcessing = false;
   };
 
-  // watch the links file for changes
   const watcher = chokidar.watch(linksFile, {
     persistent: true,
   });
@@ -136,6 +130,5 @@ let isProcessing = false;
     await processLinks();
   });
 
-  // initial run
   await processLinks();
 })();
