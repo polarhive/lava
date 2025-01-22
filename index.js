@@ -1,3 +1,4 @@
+const { createClient } = require("webdav");
 const fs = require("fs");
 const puppeteer = require("puppeteer");
 const path = require("path");
@@ -10,10 +11,26 @@ let isProcessing = false;
   const vault = process.env.VAULT;
   const clippingDir = process.env.CLIPPING_DIR;
   const linksFile = process.env.LINKS_FILE;
-  const outputFolder = path.join(__dirname, vault);
+  const webdavUrl = process.env.WEBDAV_URL;
+  const webdavUsername = process.env.WEBDAV_USERNAME;
+  const webdavPassword = process.env.WEBDAV_PASSWORD;
 
-  console.log(`Watching: ${linksFile}`);
-  console.log(`Clippings will be saved to: ${path.join(outputFolder, clippingDir)}`);
+  // operating mode
+  const isWebDAVMode = webdavUrl && webdavUsername && webdavPassword;
+  const finalClippingDir = isWebDAVMode
+    ? path.join(vault, clippingDir).replace(/\\/g, "/")
+    : path.join(__dirname, vault, clippingDir);
+
+  let webdavClient;
+  if (isWebDAVMode) {
+    webdavClient = createClient(webdavUrl, {
+      username: webdavUsername,
+      password: webdavPassword,
+    });
+    console.log(`WebDAV mode enabled. Clippings will be saved to: ${finalClippingDir}`);
+  } else {
+    console.log(`Local mode enabled. Clippings will be saved to: ${finalClippingDir}`);
+  }
 
   if (!fs.existsSync(linksFile)) {
     console.error(`File "${linksFile}" not found.`);
@@ -102,12 +119,18 @@ let isProcessing = false;
           });
         });
 
-        const filePath = path.join(outputFolder, clippingDir, result.fileName);
-        const dir = path.dirname(filePath);
-        if (!fs.existsSync(dir)) {
-          fs.mkdirSync(dir, { recursive: true });
+        const filePath = path.join(finalClippingDir, result.fileName);
+
+        if (isWebDAVMode) {
+          const remotePath = filePath.replace(/\\/g, "/");
+          await webdavClient.putFileContents(remotePath, result.fileContent, { overwrite: true });
+        } else {
+          const dir = path.dirname(filePath);
+          if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+          }
+          fs.writeFileSync(filePath, result.fileContent, "utf-8");
         }
-        fs.writeFileSync(filePath, result.fileContent, "utf-8");
 
         updatedLinks[i] = `- [x] ${task}`;
       } catch (error) {

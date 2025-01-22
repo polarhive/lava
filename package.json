@@ -2,6 +2,7 @@
 	"dependencies": {
 		"chokidar": "^4.0.3",
 		"dotenv": "^16.4.7",
-		"puppeteer": "^23.11.1"
+		"puppeteer": "^23.11.1",
+		"webdav": "^5.7.1"
 	}
 }
