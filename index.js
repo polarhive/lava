@@ -67,10 +67,10 @@ let isProcessing = false;
           return new Promise(async (resolve, reject) => {
             try {
               const Turndown = (
-                await import("https://unpkg.com/turndown@latest?module")
+                await import("https://unpkg.com/turndown@7.2.0/lib/turndown.es.js?module")
               ).default;
               const Readability = (
-                await import("https://unpkg.com/@tehshrike/readability@latest")
+                await import("https://unpkg.com/@tehshrike/readability@0.2.0/readability.js")
               ).default;
 
               const { title, byline, content } = new Readability(
@@ -88,7 +88,6 @@ let isProcessing = false;
 
               const fileContent =
                 "---\n" +
-                `category: "[[Clippings]]"\n` +
                 `author: "${byline || ""}"\n` +
                 `title: "${title}"\n` +
                 `source: ${document.URL}\n` +
