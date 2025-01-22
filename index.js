@@ -2,7 +2,9 @@ const fs = require("fs");
 const puppeteer = require("puppeteer");
 const path = require("path");
 const chokidar = require("chokidar");
-require("dotenv").config(); // Load environment variables from .env file
+require("dotenv").config();
+
+let isProcessing = false; 
 
 (async () => {
   const vault = process.env.VAULT;
@@ -11,133 +13,95 @@ require("dotenv").config(); // Load environment variables from .env file
   const outputFolder = path.join(__dirname, vault);
 
   console.log(`Watching: ${linksFile}`);
-  console.log(
-    `Clippings will be saved to: ${path.join(outputFolder, clippingDir)}`,
-  );
+  console.log(`Clippings will be saved to: ${path.join(outputFolder, clippingDir)}`);
 
   if (!fs.existsSync(linksFile)) {
     console.error(`File "${linksFile}" not found.`);
     process.exit(1);
   }
 
-  let isProcessing = false;
+  const sanitizeLink = (link) => link.replace(/^[-\s\[\]x]+/, "").trim();
+  const isValidHttpLink = (link) => /^https?:\/\/[^\s/$.?#].[^\s]*$/i.test(link);
 
-  // Watch for changes in the bookmarks file
-  chokidar.watch(linksFile, { persistent: true }).on("change", async () => {
+  const processLinks = async () => {
     if (isProcessing) {
-      console.log("Currently processing links. Skipping this change.");
+      console.log("Processing already in progress. Skipping this cycle.");
       return;
     }
 
-    console.log("Detected changes in bookmarks.md. Processing...");
     isProcessing = true;
+    console.log("Processing links...");
 
     const links = fs
       .readFileSync(linksFile, "utf-8")
       .split("\n")
-      .filter((link) => link.trim() !== "");
-    if (links.length === 0) {
-      console.error(`No valid links found in "${linksFile}".`);
-      isProcessing = false;
-      return;
-    }
-
-    if (!fs.existsSync(outputFolder)) {
-      fs.mkdirSync(outputFolder, { recursive: true });
-    }
+      .filter((line) => line.trim() !== "");
 
     const browser = await puppeteer.launch({
       headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"], // fix for ubuntu VPS
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
     });
     const page = await browser.newPage();
-
     let updatedLinks = [...links];
-    for (let i = 0; i < links.length; i++) {
-      let link = links[i].trim();
 
-      // Skip if the link is already processed (starts with "- [x]")
-      if (link.startsWith("- [x]")) {
-        console.log(`Skipping already visited link: ${link}`);
+    for (let i = 0; i < links.length; i++) {
+      let line = links[i].trim();
+
+      if (line.startsWith("- [x]")) {
+        console.log(`Skipping already processed: ${line}`);
         continue;
       }
 
-      // Remove the leading "- [ ]" or "- " (checkbox and hyphen) to get the URL
-      link = link
-        .replace(/^-\s*\[([x\s])\]\s*/, "")
-        .replace(/^-\s*/, "")
-        .trim();
+      let task = sanitizeLink(line);
+      if (!isValidHttpLink(task)) {
+        console.log(`Skipping non-URL task: ${task}`);
+        continue;
+      }
 
       try {
-        console.log(`Processing link: ${link}`);
-        await page.goto(link, { waitUntil: "domcontentloaded" });
+        console.log(`Processing link: ${task}`);
+        await page.goto(task, { waitUntil: "domcontentloaded", timeout: 30000 });
 
         // clipper logic
         const result = await page.evaluate(() => {
-          return new Promise(async (resolve) => {
-            const Turndown = (
-              await import("https://unpkg.com/turndown@latest?module")
-            ).default;
-            const Readability = (
-              await import("https://unpkg.com/@tehshrike/readability@latest")
-            ).default;
+          return new Promise(async (resolve, reject) => {
+            try {
+              const Turndown = (
+                await import("https://unpkg.com/turndown@latest?module")
+              ).default;
+              const Readability = (
+                await import("https://unpkg.com/@tehshrike/readability@latest")
+              ).default;
 
-            let tags = "clippings";
+              const { title, byline, content } = new Readability(
+                document.cloneNode(true)
+              ).parse();
 
-            if (document.querySelector('meta[name="keywords" i]')) {
-              const keywords = document
-                .querySelector('meta[name="keywords" i]')
-                .getAttribute("content")
-                .split(",");
-
-              keywords.forEach((keyword) => {
-                tags += " " + keyword.split(" ").join("");
-              });
-            }
-
-            function getSelectionHtml() {
-              let html = "";
-              if (window.getSelection) {
-                const sel = window.getSelection();
-                if (sel.rangeCount) {
-                  const container = document.createElement("div");
-                  for (let i = 0; i < sel.rangeCount; i++) {
-                    container.appendChild(sel.getRangeAt(i).cloneContents());
-                  }
-                  html = container.innerHTML;
-                }
+              function sanitizeFileName(name) {
+                return name.replace(/[:/\\?%*"<>|]/g, "-").trim();
               }
-              return html;
+              const fileName = sanitizeFileName(title) + ".md";
+
+              const markdownBody = new Turndown().turndown(content);
+              const today = new Date().toISOString().split("T")[0];
+              const tags = "clippings";
+
+              const fileContent =
+                "---\n" +
+                `category: "[[Clippings]]"\n` +
+                `author: "${byline || ""}"\n` +
+                `title: "${title}"\n` +
+                `source: ${document.URL}\n` +
+                `clipped: ${today}\n` +
+                `tags: [${tags}]\n` +
+                "---\n\n" +
+                `# ${title}\n\n` +
+                markdownBody;
+
+              resolve({ fileName, fileContent });
+            } catch (error) {
+              reject(error);
             }
-
-            const selection = getSelectionHtml();
-            const { title, byline, content } = new Readability(
-              document.cloneNode(true),
-            ).parse();
-
-            function sanitizeFileName(name) {
-              return name.replace(/[:/\\?%*"<>|]/g, "-").trim();
-            }
-            const fileName = sanitizeFileName(title) + ".md";
-
-            const markdownify = selection || content;
-            const markdownBody = new Turndown().turndown(markdownify);
-
-            const today = new Date().toISOString().split("T")[0];
-
-            const fileContent =
-              "---\n" +
-              `category: "[[Clippings]]"\n` +
-              `author: "${byline || ""}"\n` +
-              `title: "${title}"\n` +
-              `source: ${document.URL}\n` +
-              `clipped: ${today}\n` +
-              `tags: [${tags}]\n` +
-              "---\n\n" +
-              `# ${title}\n\n` +
-              markdownBody;
-
-            resolve({ fileName, fileContent });
           });
         });
 
@@ -149,26 +113,30 @@ require("dotenv").config(); // Load environment variables from .env file
         }
         fs.writeFileSync(filePath, result.fileContent, "utf-8");
 
-        updatedLinks = updatedLinks.map((linkLine, idx) => {
-          if (idx === i && linkLine.trim() === links[i].trim()) {
-            return `- [x] ${link}`; // Mark the link as processed
-          }
-          return linkLine;
-        });
+        console.log(`Saved clipping: ${filePath}`);
+        updatedLinks[i] = `- [x] ${task}`;
       } catch (error) {
-        console.error(
-          `Failed to process link: ${link}. Error: ${error.message}`,
-        );
+        console.error(`Failed to process link: ${task}. Error: ${error.message}`);
       }
     }
 
-    // Write the updated links back to bookmarks.md after processing all links
     fs.writeFileSync(linksFile, updatedLinks.join("\n"), "utf-8");
-    console.log("Updated bookmarks.md with processed links.");
-
     await browser.close();
     console.log("All links processed.");
 
     isProcessing = false;
+  };
+
+  // watch the links file for changes
+  const watcher = chokidar.watch(linksFile, {
+    persistent: true,
   });
+
+  watcher.on("change", async (path) => {
+    console.log(`File ${path} has been changed.`);
+    await processLinks();
+  });
+
+  // initial run
+  await processLinks();
 })();
