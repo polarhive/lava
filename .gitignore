@@ -2,5 +2,9 @@
 .env
 content
 node_modules
+bun.lockb
 pnpm-lock.yaml
+package-lock.json
 vault
+*.log
+.DS_Store

@@ -1,8 +1,19 @@
 {
+	"name": "lava",
+	"version": "1.0.0",
+	"type": "module",
+	"scripts": {
+		"start": "bun run index.ts",
+		"dev": "bun --watch index.ts"
+	},
 	"dependencies": {
 		"chokidar": "^4.0.3",
-		"dotenv": "^16.4.7",
-		"puppeteer": "^23.11.1",
-		"webdav": "^5.7.1"
+		"defuddle": "^0.6.6",
+		"jsdom": "^25.0.1",
+		"puppeteer": "^23.11.1"
+	},
+	"devDependencies": {
+		"@types/bun": "latest",
+		"@types/node": "^22.10.5"
 	}
 }

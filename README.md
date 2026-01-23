@@ -5,16 +5,14 @@ automatically populates your Obsidian clippings directory with fresh content.
 
 ## Prerequisites
 
-- VPS or PC capable of running `node`
+- [Bun](https://bun.sh) v1.0 or higher
 - An Obsidian vault with a .md file containing links
 
 ## Setup
 
 ```sh
-git clone --depth=1 https://github.com/polarhive/lava
-cd lava; npm i
-ln -s /path/to/vault vault -f; # symlink from lava/vault
-npx puppeteer browsers install chrome-headless-shell
+git clone --depth=1 https://github.com/polarhive/lava; cd lava
+bun i
 ```
 
 ## Configuration
@@ -30,19 +28,22 @@ LINKS_FILE=vault/bookmarks.md
 ## Usage
 
 The process is mostly automated. Simply add a new link to your bookmarks.md
-file from any device, and lava will handle the rest. (This assumes you've set
-up your vault to sync with the VPS or PC running the lava daemon).
-
-ref: [remotely](https://polarhive.net/blog/obsidian)
+file from any device, and lava will handle the rest.
 
 ```sh
-node index.js
+bun start
 ```
 
-A new file will be created in your **Obsidian clippings** directory with the title of the link.
+Or for development with auto-reload:
+
+```sh
+bun dev
+```
 
 ## LICENSE
 
 - MIT 2025. Nathan Matthew Paul
-- MIT 2024. Obsidian [clipper bookmarklet](https://gist.github.com/kepano/90c05f162c37cf730abb8ff027987ca3)
+- MIT 2024. Obsidian [clipper](https://github.com/obsidianmd/obsidian-clipper)
+- MIT 2024. Defuddle [content extraction](https://github.com/kepano/defuddle)
+
 
