@@ -4,14 +4,15 @@
 	"type": "module",
 	"scripts": {
 		"start": "bun run index.ts",
-		"dev": "bun --watch index.ts"
+		"dev": "bun --watch index.ts",
+		"postinstall": "npx puppeteer browsers install chrome"
 	},
 	"dependencies": {
 		"@types/jsdom": "^27.0.0",
 		"chokidar": "^5.0.0",
 		"defuddle": "^0.6.6",
 		"jsdom": "^27.4.0",
-		"puppeteer": "^24.36.0"
+		"puppeteer-core": "^24.36.0"
 	},
 	"devDependencies": {
 		"@types/bun": "^1.3.6",

@@ -71,6 +71,17 @@ For development with auto-reload:
 bun dev
 ```
 
+## Deployment
+
+### Render.com
+
+This project is configured for deployment on Render.com. The `postinstall` script automatically installs Chrome for Puppeteer during the build process.
+
+Set the following environment variables in your Render.com service:
+- `VAULT`: Path to your vault directory (optional for API mode)
+- `CLIPPING_DIR`: Directory where clippings are saved (optional for API mode)
+- `LINKS_FILE`: Path to links file for daemon mode (optional)
+
 ## LICENSE
 
 - MIT 2025. Nathan Matthew Paul
