@@ -14,7 +14,7 @@ export class FileWatcher {
         this.config = config;
     }
 
-    startWatching(processor: { processLinks: (links: string[]) => Promise<ProcessResult | string[]> }): void {
+    startWatching(processor: { processLinks: (links: string[], returnFormat?: any, parser?: any, saveToDisk?: any) => Promise<ProcessResult | string[]> }): void {
         const linksFile = this.config.getLinksFilePath();
 
         if (!existsSync(linksFile)) {
@@ -35,59 +35,91 @@ export class FileWatcher {
             let content = readFileSync(linksFile, "utf-8");
             let lines = content.split("\n");
 
-            // Process each line individually
+            // Batch process all pending links to avoid repeated disk reads
+            const pending: Array<{ index: number; raw: string; sanitized: string }> = [];
+
             for (let i = 0; i < lines.length; i++) {
-                const line = lines[i].trim();
+                const rawLine = lines[i];
+                const line = rawLine.trim();
                 if (LinkUtils.shouldSkip(line)) continue;
 
                 const sanitizedLink = LinkUtils.sanitizeLink(line);
                 if (!LinkUtils.isValidHttpLink(sanitizedLink)) continue;
 
-                Logger.info(`Processing: ${sanitizedLink}`);
-                try {
-                    const result = await processor.processLinks([line]) as string[];
-                    if (result[0] !== line) { // Only update if the link was actually processed
-                        lines[i] = result[0];
+                pending.push({ index: i, raw: rawLine, sanitized: sanitizedLink });
+            }
+
+            if (pending.length === 0) return;
+
+            const total = pending.length;
+            Logger.info(`Processing ${total} new link(s)...`);
+
+            try {
+                const result = await processor.processLinks(
+                    pending.map(p => p.raw),
+                    "md",
+                    undefined,
+                    undefined,
+                    (idx: number, sanitized: string) => {
+                        // Callback fired after each link is processed
+                        const item = pending[idx];
+                        lines[item.index] = sanitized;
                         this.lastWriteTime = Date.now();
                         writeFileSync(linksFile, lines.join("\n"), "utf-8");
-                        Logger.success(`Checked off: ${sanitizedLink}`);
+                        Logger.success(`✓ Checked off [${idx + 1}/${total}]: ${item.sanitized}`);
                     }
-                } catch (error) {
-                    Logger.error(`Failed to process ${sanitizedLink}: ${error instanceof Error ? error.message : String(error)}`);
-                }
+                ) as ProcessResult;
+            } catch (error) {
+                Logger.error(`Failed batch processing: ${error instanceof Error ? error.message : String(error)}`);
             }
         });
 
-        Logger.info("✓ Daemon mode ready with " + this.config.parser + " parser");
+        Logger.debug("✓ Daemon mode ready with " + this.config.parser + " parser");
     }
 
-    async initialProcess(processor: { processLinks: (links: string[]) => Promise<ProcessResult | string[]> }): Promise<void> {
+    async initialProcess(processor: { processLinks: (links: string[], returnFormat?: any, parser?: any, saveToDisk?: any) => Promise<ProcessResult | string[]> }): Promise<void> {
         const linksFile = this.config.getLinksFilePath();
-        Logger.info(`Initial processing with parser: ${this.config.parser}`);
+        Logger.debug(`Initial processing with parser: ${this.config.parser}`);
 
         let content = readFileSync(linksFile, "utf-8");
         let lines = content.split("\n");
 
-        // Process each line individually
+        // Batch process all pending links to avoid repeated disk reads
+        const pending: Array<{ index: number; raw: string; sanitized: string }> = [];
+
         for (let i = 0; i < lines.length; i++) {
-            const line = lines[i].trim();
+            const rawLine = lines[i];
+            const line = rawLine.trim();
             if (LinkUtils.shouldSkip(line)) continue;
 
             const sanitizedLink = LinkUtils.sanitizeLink(line);
             if (!LinkUtils.isValidHttpLink(sanitizedLink)) continue;
 
-            Logger.info(`Processing: ${sanitizedLink}`);
-            try {
-                const result = await processor.processLinks([line]) as string[];
-                if (result[0] !== line) { // Only update if the link was actually processed
-                    lines[i] = result[0];
+            pending.push({ index: i, raw: rawLine, sanitized: sanitizedLink });
+        }
+
+        if (pending.length === 0) return;
+
+        const total = pending.length;
+        Logger.info(`Processing ${total} link(s) initially...`);
+
+        try {
+            const result = await processor.processLinks(
+                pending.map(p => p.raw),
+                "md",
+                undefined,
+                undefined,
+                (idx: number, sanitized: string) => {
+                    // Callback fired after each link is processed
+                    const item = pending[idx];
+                    lines[item.index] = sanitized;
                     this.lastWriteTime = Date.now();
                     writeFileSync(linksFile, lines.join("\n"), "utf-8");
-                    Logger.success(`Checked off: ${sanitizedLink}`);
+                    Logger.success(`✓ Checked off [${idx + 1}/${total}]: ${item.sanitized}`);
                 }
-            } catch (error) {
-                Logger.error(`Failed to process ${sanitizedLink}: ${error instanceof Error ? error.message : String(error)}`);
-            }
+            ) as ProcessResult;
+        } catch (error) {
+            Logger.error(`Failed batch processing: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
 

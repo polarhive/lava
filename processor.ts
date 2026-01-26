@@ -1,7 +1,7 @@
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
 import { join, dirname } from "path";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
-import { JSDOM } from "jsdom";
+import { JSDOM, VirtualConsole } from "jsdom";
 import { Defuddle } from "defuddle/node";
 import { ConfigManager, Parser, ReturnFormat } from "./config";
 import { ProcessResult } from "./types";
@@ -48,7 +48,7 @@ export class LinkProcessor {
             }
         }
 
-        console.log(`Searching for Chrome in: ${cacheDir}`);
+        Logger.debug(`Searching for Chrome in: ${cacheDir}`);
 
         // Helper function to find Chrome executable in directory
         const findChromeExecutable = (dir: string): string | undefined => {
@@ -88,12 +88,12 @@ export class LinkProcessor {
         // Try to find Chrome in cache directory
         chromePath = findChromeExecutable(path.join(cacheDir, 'chrome'));
         if (chromePath) {
-            console.log(`Using Chrome at: ${chromePath}`);
+            Logger.debug(`Using Chrome at: ${chromePath}`);
         } else {
             // Try to find Chrome-headless-shell in cache directory
             chromePath = findChromeExecutable(path.join(cacheDir, 'chrome-headless-shell'));
             if (chromePath) {
-                console.log(`Using Chrome-headless-shell at: ${chromePath}`);
+                Logger.debug(`Using Chrome-headless-shell at: ${chromePath}`);
             }
         }
 
@@ -109,7 +109,7 @@ export class LinkProcessor {
             for (const sysPath of systemPaths) {
                 if (fs.existsSync(sysPath)) {
                     chromePath = sysPath;
-                    console.log(`Using system Chrome at: ${chromePath}`);
+                    Logger.debug(`Using system Chrome at: ${chromePath}`);
                     break;
                 }
             }
@@ -119,9 +119,9 @@ export class LinkProcessor {
             // List cache contents for debugging
             try {
                 if (fs.existsSync(cacheDir)) {
-                    console.log(`Cache directory contents (${cacheDir}):`);
+                    Logger.debug(`Cache directory contents (${cacheDir}):`);
                     const cacheContents = fs.readdirSync(cacheDir, { recursive: true });
-                    cacheContents.slice(0, 20).forEach(item => console.log(`  ${item}`));
+                    cacheContents.slice(0, 20).forEach(item => Logger.debug(`  ${item}`));
                 }
             } catch (error) {
                 console.warn('Could not list cache contents:', error);
@@ -163,13 +163,46 @@ export class LinkProcessor {
             return { updatedLink: line, markdown: returnMarkdown ? "" : undefined };
         }
 
+        const youtubeId = LinkUtils.getYouTubeId(task);
+        if (youtubeId) {
+            Logger.info(`Embedding YouTube link: ${task}`);
+            const ytTitle = await FileUtils.fetchYouTubeTitle(task);
+            const embed = FileUtils.buildYouTubeEmbed(ytTitle || "", task, youtubeId);
+            const fileName = LinkUtils.sanitizeFileName(embed.title || `YouTube_${youtubeId}`) + ".md";
+            let filePath = "";
+
+            if (saveToDisk) {
+                filePath = join(this.config.getClippingPath(), fileName);
+                const dir = dirname(filePath);
+                if (!existsSync(dir)) {
+                    mkdirSync(dir, { recursive: true });
+                }
+                writeFileSync(filePath, embed.content, "utf-8");
+                Logger.success(`Saved: ${filePath}`);
+            } else {
+                Logger.info(`Would save to: ${fileName}`);
+            }
+
+            return {
+                updatedLink: LinkUtils.markAsProcessed(task),
+                markdown: returnMarkdown ? embed.content : undefined,
+                frontmatter: embed.frontmatterObj,
+                body: embed.content
+            };
+        }
+
+        if (LinkUtils.isBlockedDomain(task)) {
+            Logger.info(`Skipping blocked domain: ${task}`);
+            return { updatedLink: line, markdown: returnMarkdown ? "" : undefined };
+        }
+
         if (LinkUtils.hasNonHtmlExtension(task)) {
             Logger.debug(`Skipping! non-HTML file extension: ${task}`);
             return { updatedLink: line, markdown: returnMarkdown ? "" : undefined };
         }
 
         try {
-            Logger.info(`Processing link (Puppeteer): ${task}`);
+            Logger.debug(`Processing link (JSDOM): ${task}`);
             const page: Page = await browser.newPage();
 
             const response = await page.goto(task, { waitUntil: "domcontentloaded", timeout: 30000 });
@@ -187,14 +220,16 @@ export class LinkProcessor {
                 url: document.URL,
             }));
 
-            const dom = new JSDOM(pageData.html, { url: pageData.url });
+            const virtualConsole = new VirtualConsole();
+            const dom = new JSDOM(pageData.html, { url: pageData.url, virtualConsole });
             const result = await Defuddle(dom, pageData.url, {
                 markdown: true,
                 debug: false,
             });
 
             if (!result.content) {
-                throw new Error("Failed to extract article content");
+                Logger.debug(`Extraction details: title="${result.title || 'none'}", domain="${result.domain || 'none'}", html length=${pageData.html.length}`);
+                throw new Error(`Failed to extract article content from ${pageData.url}`);
             }
 
             // Fix relative image paths to absolute
@@ -233,7 +268,7 @@ export class LinkProcessor {
                     mkdirSync(dir, { recursive: true });
                 }
                 writeFileSync(filePath, fileContent, "utf-8");
-                Logger.success(`Saved: ${filePath}`);
+                Logger.success(`✓ Saved: ${filePath}`);
             } else {
                 Logger.info(`Would save to: ${fileName}`);
             }
@@ -248,15 +283,27 @@ export class LinkProcessor {
             };
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            Logger.error(`Failed to process link: ${task}. Error: ${errorMessage}`);
-            return { updatedLink: line, markdown: returnMarkdown ? "" : undefined };
+
+            // Detect CloudFlare challenge
+            if (task.includes('__cf_chl') || task.includes('cf_chl_rt') || errorMessage.toLowerCase().includes('cloudflare')) {
+                Logger.error(`Failed to process link: ${task}. Error: ${errorMessage}`);
+                Logger.warn(`Cloudflare challenge detected - site may be blocking automated access`);
+            } else {
+                Logger.error(`Failed to process link: ${task}. Error: ${errorMessage}`);
+            }
+
+            // Fallback to fetch/JSDOM extraction
+            Logger.warn(`Falling back to fetch for: ${task}`);
+            const fallback = await this.processSingleLinkWithFetch(link, returnMarkdown, saveToDisk, true);
+            return fallback;
         }
     }
 
     private async processSingleLinkWithFetch(
         link: string,
         returnMarkdown: boolean,
-        saveToDisk: boolean
+        saveToDisk: boolean,
+        allowStub: boolean = false
     ): Promise<{ updatedLink: string; markdown?: string; frontmatter?: any; body?: string }> {
         const line = link.trim();
 
@@ -271,13 +318,46 @@ export class LinkProcessor {
             return { updatedLink: line, markdown: returnMarkdown ? "" : undefined };
         }
 
+        const youtubeId = LinkUtils.getYouTubeId(task);
+        if (youtubeId) {
+            Logger.info(`Embedding YouTube link: ${task}`);
+            const ytTitle = await FileUtils.fetchYouTubeTitle(task);
+            const embed = FileUtils.buildYouTubeEmbed(ytTitle || "", task, youtubeId);
+            const fileName = LinkUtils.sanitizeFileName(embed.title || `YouTube_${youtubeId}`) + ".md";
+            let filePath = "";
+
+            if (saveToDisk) {
+                filePath = join(this.config.getClippingPath(), fileName);
+                const dir = dirname(filePath);
+                if (!existsSync(dir)) {
+                    mkdirSync(dir, { recursive: true });
+                }
+                writeFileSync(filePath, embed.content, "utf-8");
+                Logger.success(`Saved: ${filePath}`);
+            } else {
+                Logger.info(`Would save to: ${fileName}`);
+            }
+
+            return {
+                updatedLink: LinkUtils.markAsProcessed(task),
+                markdown: returnMarkdown ? embed.content : undefined,
+                frontmatter: embed.frontmatterObj,
+                body: embed.content
+            };
+        }
+
+        if (LinkUtils.isBlockedDomain(task)) {
+            Logger.info(`Skipping blocked domain: ${task}`);
+            return { updatedLink: line, markdown: returnMarkdown ? "" : undefined };
+        }
+
         if (LinkUtils.hasNonHtmlExtension(task)) {
             Logger.debug(`Skipping! non-HTML file extension: ${task}`);
             return { updatedLink: line, markdown: returnMarkdown ? "" : undefined };
         }
 
         try {
-            Logger.info(`Processing link (JSDOM): ${task}`);
+            Logger.debug(`Processing link (JSDOM): ${task}`);
             const response = await fetch(task);
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
@@ -291,14 +371,16 @@ export class LinkProcessor {
             const html = await response.text();
 
             // Parse with Defuddle (used by official obsidian-clipper)
-            const dom = new JSDOM(html, { url: task });
+            const virtualConsole = new VirtualConsole();
+            const dom = new JSDOM(html, { url: task, virtualConsole });
             const result = await Defuddle(dom, task, {
                 markdown: true,
                 debug: false,
             });
 
             if (!result.content) {
-                throw new Error("Failed to extract article content");
+                Logger.debug(`Extraction details: title="${result.title || 'none'}", domain="${result.domain || 'none'}", html length=${html.length}`);
+                throw new Error(`Failed to extract article content from ${task}`);
             }
 
             // Fix relative image paths to absolute
@@ -337,7 +419,7 @@ export class LinkProcessor {
                     mkdirSync(dir, { recursive: true });
                 }
                 writeFileSync(filePath, fileContent, "utf-8");
-                Logger.success(`Saved: ${filePath}`);
+                Logger.success(`✓ Saved: ${filePath}`);
             } else {
                 Logger.info(`Would save to: ${fileName}`);
             }
@@ -350,7 +432,36 @@ export class LinkProcessor {
             };
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            Logger.error(`Failed to process link: ${task}. Error: ${errorMessage}`);
+
+            // Detect CloudFlare challenge
+            if (task.includes('__cf_chl') || task.includes('cf_chl_rt') || errorMessage.toLowerCase().includes('cloudflare')) {
+                Logger.error(`Failed to process link: ${task}. Error: ${errorMessage}`);
+                Logger.warn(`Cloudflare challenge detected - site may be blocking automated access`);
+            } else {
+                Logger.error(`Failed to process link: ${task}. Error: ${errorMessage}`);
+            }
+
+            if (allowStub) {
+                const stub = FileUtils.buildStubMarkdown("", task);
+
+                if (saveToDisk) {
+                    const fileName = LinkUtils.sanitizeFileName("Link_Fallback") + ".md";
+                    const filePath = join(this.config.getClippingPath(), fileName);
+                    const dir = dirname(filePath);
+                    if (!existsSync(dir)) {
+                        mkdirSync(dir, { recursive: true });
+                    }
+                    writeFileSync(filePath, stub, "utf-8");
+                    Logger.warn(`Saved fallback stub: ${filePath}`);
+                }
+
+                return {
+                    updatedLink: LinkUtils.markAsProcessed(task),
+                    markdown: returnMarkdown ? stub : undefined,
+                    frontmatter: {},
+                    body: stub
+                };
+            }
             return { updatedLink: line, markdown: returnMarkdown ? "" : undefined };
         }
     }
@@ -373,54 +484,152 @@ export class LinkProcessor {
         links: string[],
         returnFormat?: ReturnFormat,
         parser?: Parser,
-        saveToDisk?: boolean
+        saveToDisk?: boolean,
+        onLinkProcessed?: (index: number, updatedLink: string) => void
     ): Promise<ProcessResult | string[] | any[]> {
         const finalReturnFormat = returnFormat || this.config.returnFormat;
         const finalParser = parser || this.config.parser;
         const finalSaveToDisk = saveToDisk !== undefined ? saveToDisk : this.config.saveToDisk;
 
+        const total = links.length;
+        Logger.info(`Processing ${total} link(s) [parser=${finalParser}, format=${finalReturnFormat}, save=${finalSaveToDisk ? "yes" : "no"}]`);
         if (finalSaveToDisk) {
-            Logger.info(`Clippings will be saved to: ${this.config.getClippingPath()}`);
+            Logger.debug(`Clippings path: ${this.config.getClippingPath()}`);
         }
-        Logger.info(`Using parser: ${finalParser}`);
-        Logger.info(`Return format: ${finalReturnFormat}`);
-        Logger.info(`Save to disk: ${finalSaveToDisk}`);
 
         const updatedLinks: string[] = [];
         const markdownResults: string[] = [];
         const jsonResults: any[] = [];
         const returnMarkdown = finalReturnFormat === "md";
 
-        if (finalParser === "puppeteer") {
-            const browser = await this.initializePuppeteer();
+        let processedCount = 0;
 
-            try {
-                for (const link of links) {
-                    const result = await this.processSingleLinkWithPuppeteer(link, browser, returnMarkdown, finalSaveToDisk);
-                    updatedLinks.push(result.updatedLink);
-                    if (returnMarkdown && result.markdown !== undefined) {
-                        markdownResults.push(result.markdown);
+        if (finalParser === "puppeteer") {
+            const pending: Array<{ link: string; idx: number; task: string }> = [];
+
+            for (const link of links) {
+                const line = link.trim();
+                const task = LinkUtils.sanitizeLink(line);
+                const idx = ++processedCount;
+
+                if (LinkUtils.isProcessed(line)) {
+                    if (total > 1) {
+                        Logger.info(`${idx}/${total} Already checked off`);
+                    } else {
+                        Logger.info(`Already checked off`);
                     }
-                    if (!returnMarkdown && result.frontmatter && result.body) {
-                        jsonResults.push({
-                            url: link,
-                            frontmatter: result.frontmatter,
-                            body: result.body
-                        });
+                    updatedLinks.push(line);
+                    if (onLinkProcessed) onLinkProcessed(updatedLinks.length - 1, line);
+                    continue;
+                }
+
+                const youtubeId = LinkUtils.getYouTubeId(task);
+                if (youtubeId) {
+                    if (total > 1) {
+                        Logger.info(`${idx}/${total} Embedding YouTube: ${task}`);
+                    } else {
+                        Logger.info(`Embedding YouTube: ${task}`);
                     }
+                    const ytTitle = await FileUtils.fetchYouTubeTitle(task);
+                    const embed = FileUtils.buildYouTubeEmbed(ytTitle || "", task, youtubeId);
+                    const fileName = LinkUtils.sanitizeFileName(embed.title || `YouTube_${youtubeId}`) + ".md";
+
+                    if (finalSaveToDisk) {
+                        const filePath = join(this.config.getClippingPath(), fileName);
+                        const dir = dirname(filePath);
+                        if (!existsSync(dir)) {
+                            mkdirSync(dir, { recursive: true });
+                        }
+                        writeFileSync(filePath, embed.content, "utf-8");
+                        Logger.success(`✓ Saved: ${filePath}`);
+                    } else {
+                        Logger.debug(`Would save to: ${fileName}`);
+                    }
+
+                    updatedLinks.push(LinkUtils.markAsProcessed(task));
+                    if (onLinkProcessed) onLinkProcessed(updatedLinks.length - 1, updatedLinks[updatedLinks.length - 1]);
+                    if (returnMarkdown) {
+                        markdownResults.push(embed.content);
+                    } else {
+                        jsonResults.push({ url: link, frontmatter: embed.frontmatterObj, body: embed.content });
+                    }
+                    continue;
                 }
-            } finally {
-                if (this.browser) {
-                    await this.browser.close();
-                    this.browser = null;
+
+                if (!LinkUtils.isValidHttpLink(task)) {
+                    Logger.debug(`${idx}/${total} Skipping non-URL: ${task}`);
+                    updatedLinks.push(line);
+                    if (onLinkProcessed) onLinkProcessed(updatedLinks.length - 1, line);
+                    continue;
                 }
-                Logger.info("All links processed.");
+
+                if (LinkUtils.isBlockedDomain(task)) {
+                    Logger.debug(`${idx}/${total} Skipping blocked domain: ${task}`);
+                    updatedLinks.push(line);
+                    if (onLinkProcessed) onLinkProcessed(updatedLinks.length - 1, line);
+                    continue;
+                }
+
+                if (LinkUtils.hasNonHtmlExtension(task)) {
+                    Logger.debug(`${idx}/${total} Skipping non-HTML: ${task}`);
+                    updatedLinks.push(line);
+                    if (onLinkProcessed) onLinkProcessed(updatedLinks.length - 1, line);
+                    continue;
+                }
+
+                pending.push({ link, idx, task });
             }
+
+            if (pending.length > 0) {
+                const browser = await this.initializePuppeteer();
+
+                try {
+                    for (const item of pending) {
+                        const result = await this.processSingleLinkWithPuppeteer(item.link, browser, returnMarkdown, finalSaveToDisk);
+                        if (total > 1) {
+                            Logger.info(`${item.idx}/${total} Processed: ${item.task}`);
+                        } else {
+                            Logger.info(`Processed: ${item.task}`);
+                        }
+                        updatedLinks.push(result.updatedLink);
+                        if (onLinkProcessed) onLinkProcessed(updatedLinks.length - 1, result.updatedLink);
+                        if (returnMarkdown && result.markdown !== undefined) {
+                            markdownResults.push(result.markdown);
+                        }
+                        if (!returnMarkdown && result.frontmatter && result.body) {
+                            jsonResults.push({
+                                url: item.link,
+                                frontmatter: result.frontmatter,
+                                body: result.body
+                            });
+                        }
+                    }
+                } finally {
+                    if (this.browser) {
+                        await this.browser.close();
+                        this.browser = null;
+                    }
+                }
+            } else {
+                Logger.debug("No eligible links for Puppeteer; skipping browser startup.");
+            }
+
+            Logger.info("All links processed.");
         } else {
             // Use JSDOM mode
             for (const link of links) {
+                const line = link.trim();
+                const task = LinkUtils.sanitizeLink(line);
+                const idx = ++processedCount;
+                if (total > 1) {
+                    Logger.info(`${idx}/${total} Processing: ${task}`);
+                } else {
+                    Logger.info(`Processing: ${task}`);
+                }
+
                 const result = await this.processSingleLinkWithFetch(link, returnMarkdown, finalSaveToDisk);
                 updatedLinks.push(result.updatedLink);
+                if (onLinkProcessed) onLinkProcessed(updatedLinks.length - 1, result.updatedLink);
                 if (returnMarkdown && result.markdown !== undefined) {
                     markdownResults.push(result.markdown);
                 }

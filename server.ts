@@ -56,9 +56,10 @@ export class LavaServer {
                         const finalParser: Parser = parser === "jsdom" || parser === "puppeteer"
                             ? parser
                             : self.config.parser;
-                        const finalReturnFormat: ReturnFormat = returnFormat === "md" || returnFormat === "json"
-                            ? returnFormat
-                            : self.config.returnFormat;
+                        // Force JSON format when multiple links, otherwise use requested format
+                        const finalReturnFormat: ReturnFormat = links.length > 1
+                            ? "json"
+                            : (returnFormat === "md" || returnFormat === "json" ? returnFormat : self.config.returnFormat);
                         const finalSaveToDisk = saveToDisk !== undefined ? saveToDisk : self.config.saveToDisk;
 
                         const result = await self.processor.processLinks(
