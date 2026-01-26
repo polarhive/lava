@@ -15,9 +15,19 @@ export class LavaServer {
     start(): void {
         const self = this;
 
+        const port = Number(process.env.PORT) || 3000;
+
         const server = Bun.serve({
-            port: 3000,
+            port: port,
             async fetch(req) {
+                // Health check endpoint
+                if (req.method === 'GET' && (req.url.endsWith('/ping') || req.url.endsWith('/health'))) {
+                    return new Response(JSON.stringify({ status: 'ok', timestamp: new Date().toISOString() }), {
+                        status: 200,
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                }
+
                 if (req.method === 'POST' && req.url.endsWith('/api')) {
                     try {
                         const body = await req.text();
@@ -80,7 +90,7 @@ export class LavaServer {
                     }
                 }
 
-                return new Response('Lava Server - POST /api with { links: string[], returnFormat?: "md" | "json", parser?: "puppeteer" | "jsdom", saveToDisk?: boolean }', {
+                return new Response('Lava Server - POST /api with { links: string[], returnFormat?: "md" | "json", parser?: "puppeteer" | "jsdom", saveToDisk?: boolean } | GET /ping or /health for status', {
                     headers: { 'Content-Type': 'text/plain' }
                 });
             },

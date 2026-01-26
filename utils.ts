@@ -120,6 +120,12 @@ export class FileUtils {
         };
 
         return Object.entries(frontmatter)
+            .filter(([_, value]) => {
+                // Skip empty strings and empty arrays
+                if (typeof value === "string" && value === "") return false;
+                if (Array.isArray(value) && value.length === 0) return false;
+                return true;
+            })
             .map(([key, value]) => {
                 if (Array.isArray(value)) {
                     return `${key}:\n${value.map((v) => `  - ${v}`).join("\n")}`;

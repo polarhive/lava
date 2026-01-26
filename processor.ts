@@ -200,6 +200,15 @@ export class LinkProcessor {
                 favicon: result.favicon || "",
             };
 
+            // Filter out empty values for JSON response
+            const cleanedFrontmatter = Object.fromEntries(
+                Object.entries(frontmatterObj).filter(([_, value]) => {
+                    if (typeof value === "string" && value === "") return false;
+                    if (Array.isArray(value) && value.length === 0) return false;
+                    return true;
+                })
+            );
+
             const fileContent = this.buildFileContent(result, pageData.url);
             const fileName = LinkUtils.sanitizeFileName(result.title || "Untitled") + ".md";
             let filePath = "";
@@ -221,7 +230,7 @@ export class LinkProcessor {
             return {
                 updatedLink: LinkUtils.markAsProcessed(task),
                 markdown: returnMarkdown ? fileContent : undefined,
-                frontmatter: frontmatterObj,
+                frontmatter: cleanedFrontmatter,
                 body: result.content
             };
         } catch (error) {
@@ -282,6 +291,15 @@ export class LinkProcessor {
                 favicon: result.favicon || "",
             };
 
+            // Filter out empty values for JSON response
+            const cleanedFrontmatter = Object.fromEntries(
+                Object.entries(frontmatterObj).filter(([_, value]) => {
+                    if (typeof value === "string" && value === "") return false;
+                    if (Array.isArray(value) && value.length === 0) return false;
+                    return true;
+                })
+            );
+
             const fileContent = this.buildFileContent(result, task);
             const fileName = LinkUtils.sanitizeFileName(result.title || "Untitled") + ".md";
             let filePath = "";
@@ -301,7 +319,7 @@ export class LinkProcessor {
             return {
                 updatedLink: LinkUtils.markAsProcessed(task),
                 markdown: returnMarkdown ? fileContent : undefined,
-                frontmatter: frontmatterObj,
+                frontmatter: cleanedFrontmatter,
                 body: result.content
             };
         } catch (error) {

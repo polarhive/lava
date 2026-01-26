@@ -91,8 +91,32 @@ curl -X POST http://localhost:3000/api \
 - `saveToDisk` (optional): `true` or `false` (default: env var or `true`)
 
 **Response:**
-- Single link with markdown format: raw markdown content (`text/markdown`)
-- All other cases: JSON with `updatedLinks` and optional `markdown` array
+
+When `returnFormat: "json"`:
+```json
+[
+  {
+    "url": "https://example.com",
+    "frontmatter": {
+      "title": "Example Domain",
+      "source": "https://example.com",
+      "url": "https://example.com",
+      "author": "",
+      "published": "",
+      "clipped": "2026-01-26",
+      "tags": ["clippings"],
+      "description": "",
+      "image": "",
+      "favicon": "https://example.com/favicon.ico"
+    },
+    "body": "Document content here..."
+  }
+]
+```
+
+When `returnFormat: "md"` with single link: raw markdown content (`text/markdown`)
+
+**Note:** `CLIPPING_DIR` and `LINKS_FILE` are only required when using daemon mode or when `saveToDisk: true`. You can run the server API without these env vars if you're only extracting content without saving to disk.
 
 **Examples:**
 
