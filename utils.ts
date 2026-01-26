@@ -18,6 +18,22 @@ export class LinkUtils {
     }
 
     /**
+     * Check if URL has a non-HTML file extension
+     */
+    static hasNonHtmlExtension(link: string): boolean {
+        const nonHtmlExtensions = [
+            '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+            '.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico',
+            '.mp3', '.mp4', '.avi', '.mov', '.wmv', '.flv',
+            '.zip', '.rar', '.tar', '.gz', '.7z',
+            '.txt', '.csv', '.xml', '.json',
+            '.exe', '.dmg', '.pkg', '.deb', '.rpm'
+        ];
+        const urlPath = link.split('?')[0].toLowerCase(); // Remove query params
+        return nonHtmlExtensions.some(ext => urlPath.endsWith(ext));
+    }
+
+    /**
      * Sanitize a string to be a valid filename across all platforms
      */
     static sanitizeFileName(name: string): string {

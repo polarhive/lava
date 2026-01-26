@@ -163,11 +163,24 @@ export class LinkProcessor {
             return { updatedLink: line, markdown: returnMarkdown ? "" : undefined };
         }
 
+        if (LinkUtils.hasNonHtmlExtension(task)) {
+            Logger.debug(`Skipping! non-HTML file extension: ${task}`);
+            return { updatedLink: line, markdown: returnMarkdown ? "" : undefined };
+        }
+
         try {
             Logger.info(`Processing link (Puppeteer): ${task}`);
             const page: Page = await browser.newPage();
 
-            await page.goto(task, { waitUntil: "domcontentloaded", timeout: 30000 });
+            const response = await page.goto(task, { waitUntil: "domcontentloaded", timeout: 30000 });
+
+            // Check content type
+            const contentType = response?.headers()["content-type"] || "";
+            if (!contentType.includes("text/html")) {
+                Logger.debug(`Skipping! non-HTML content type: ${contentType} for ${task}`);
+                await page.close();
+                return { updatedLink: line, markdown: returnMarkdown ? "" : undefined };
+            }
 
             const pageData = await page.evaluate(() => ({
                 html: document.documentElement.outerHTML,
@@ -258,10 +271,23 @@ export class LinkProcessor {
             return { updatedLink: line, markdown: returnMarkdown ? "" : undefined };
         }
 
+        if (LinkUtils.hasNonHtmlExtension(task)) {
+            Logger.debug(`Skipping! non-HTML file extension: ${task}`);
+            return { updatedLink: line, markdown: returnMarkdown ? "" : undefined };
+        }
+
         try {
             Logger.info(`Processing link (JSDOM): ${task}`);
             const response = await fetch(task);
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+            // Check content type
+            const contentType = response.headers.get("content-type") || "";
+            if (!contentType.includes("text/html")) {
+                Logger.debug(`Skipping! non-HTML content type: ${contentType} for ${task}`);
+                return { updatedLink: line, markdown: returnMarkdown ? "" : undefined };
+            }
+
             const html = await response.text();
 
             // Parse with Defuddle (used by official obsidian-clipper)
