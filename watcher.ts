@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync } from "fs";
 import { existsSync } from "fs";
 import { ConfigManager } from "./config";
 import { ProcessResult } from "./types";
+import { LinkUtils, Logger } from "./utils";
 
 export class FileWatcher {
     private watcher: FSWatcher | null = null;
@@ -20,6 +21,8 @@ export class FileWatcher {
             throw new Error(`File "${linksFile}" not found.`);
         }
 
+        Logger.info(`🌋 Lava is watching for new links (parser: ${this.config.parser})...`);
+
         this.watcher = watch(linksFile, {
             persistent: true,
         });
@@ -28,60 +31,62 @@ export class FileWatcher {
             const now = Date.now();
             if (now - this.lastWriteTime < 500) return; // Ignore changes within 0.5 second of our write
 
-            console.log(`File ${path} has been changed.`);
+            Logger.info(`File ${path} has been changed.`);
             let content = readFileSync(linksFile, "utf-8");
             let lines = content.split("\n");
 
             // Process each line individually
             for (let i = 0; i < lines.length; i++) {
                 const line = lines[i].trim();
-                if (!line || line.startsWith("- [x]")) continue; // Skip empty lines and already processed
+                if (LinkUtils.shouldSkip(line)) continue;
 
-                const sanitizedLink = line.replace(/^[-\s\[\]x]+/, "").trim();
-                if (!/^https?:\/\/[^\s/$.?#].[^\s]*$/i.test(sanitizedLink)) continue; // Skip non-URLs
+                const sanitizedLink = LinkUtils.sanitizeLink(line);
+                if (!LinkUtils.isValidHttpLink(sanitizedLink)) continue;
 
-                console.log(`Processing: ${sanitizedLink}`);
+                Logger.info(`Processing: ${sanitizedLink}`);
                 try {
-                    const result = await processor.processLinks([line], false) as string[];
+                    const result = await processor.processLinks([line]) as string[];
                     if (result[0] !== line) { // Only update if the link was actually processed
                         lines[i] = result[0];
                         this.lastWriteTime = Date.now();
                         writeFileSync(linksFile, lines.join("\n"), "utf-8");
-                        console.log(`✓ Checked off: ${sanitizedLink}`);
+                        Logger.success(`Checked off: ${sanitizedLink}`);
                     }
                 } catch (error) {
-                    console.error(`Failed to process ${sanitizedLink}:`, error);
+                    Logger.error(`Failed to process ${sanitizedLink}: ${error instanceof Error ? error.message : String(error)}`);
                 }
             }
         });
 
-        console.log("🌋 Lava is watching for new links...");
+        Logger.info("✓ Daemon mode ready with " + this.config.parser + " parser");
     }
 
     async initialProcess(processor: { processLinks: (links: string[]) => Promise<ProcessResult | string[]> }): Promise<void> {
         const linksFile = this.config.getLinksFilePath();
+        Logger.info(`Initial processing with parser: ${this.config.parser}`);
+
         let content = readFileSync(linksFile, "utf-8");
         let lines = content.split("\n");
 
         // Process each line individually
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i].trim();
-            if (!line || line.startsWith("- [x]")) continue; // Skip empty lines and already processed
+            if (LinkUtils.shouldSkip(line)) continue;
 
-            const sanitizedLink = line.replace(/^[-\s\[\]x]+/, "").trim();
-            if (!/^https?:\/\/[^\s/$.?#].[^\s]*$/i.test(sanitizedLink)) continue; // Skip non-URLs
+            const sanitizedLink = LinkUtils.sanitizeLink(line);
+            if (!LinkUtils.isValidHttpLink(sanitizedLink)) continue;
 
-            console.log(`Processing: ${sanitizedLink}`);
+            Logger.info(`Processing: ${sanitizedLink}`);
             try {
-                const result = await processor.processLinks([line], false) as string[];
+                const result = await processor.processLinks([line]) as string[];
                 if (result[0] !== line) { // Only update if the link was actually processed
                     lines[i] = result[0];
                     this.lastWriteTime = Date.now();
                     writeFileSync(linksFile, lines.join("\n"), "utf-8");
-                    console.log(`✓ Checked off: ${sanitizedLink}`);
+                    Logger.success(`Checked off: ${sanitizedLink}`);
                 }
             } catch (error) {
-                console.error(`Failed to process ${sanitizedLink}:`, error);
+                Logger.error(`Failed to process ${sanitizedLink}: ${error instanceof Error ? error.message : String(error)}`);
             }
         }
     }

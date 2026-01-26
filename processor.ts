@@ -3,48 +3,168 @@ import { join, dirname } from "path";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { JSDOM } from "jsdom";
 import { Defuddle } from "defuddle/node";
-import { ConfigManager } from "./config";
+import { ConfigManager, Parser, ReturnFormat } from "./config";
 import { ProcessResult } from "./types";
+import { LinkUtils, Logger, FileUtils } from "./utils";
 
 export class LinkProcessor {
     private config: ConfigManager;
+    private browser: Browser | null = null;
 
     constructor(config: ConfigManager) {
         this.config = config;
     }
 
-    private sanitizeLink(link: string): string {
-        return link.replace(/^[-\s\[\]x]+/, "").trim();
+    private async initializePuppeteer(): Promise<Browser> {
+        if (this.browser) {
+            return this.browser;
+        }
+
+        // Find the installed Chrome executable
+        const fs = await import('fs');
+        const path = await import('path');
+        const os = await import('os');
+
+        let chromePath: string | undefined;
+
+        // Determine cache directory based on environment or platform
+        let cacheDir = process.env.PUPPETEER_CACHE_DIR;
+        if (!cacheDir) {
+            // Use platform-specific defaults
+            const homeDir = os.homedir();
+            if (process.platform === 'darwin') {
+                // macOS
+                cacheDir = path.join(homeDir, '.cache', 'puppeteer');
+            } else if (process.platform === 'linux') {
+                // Linux
+                cacheDir = process.env.XDG_CACHE_HOME
+                    ? path.join(process.env.XDG_CACHE_HOME, 'puppeteer')
+                    : path.join(homeDir, '.cache', 'puppeteer');
+            } else if (process.platform === 'win32') {
+                // Windows
+                cacheDir = path.join(process.env.LOCALAPPDATA || path.join(homeDir, 'AppData', 'Local'), 'puppeteer');
+            } else {
+                cacheDir = path.join(homeDir, '.cache', 'puppeteer');
+            }
+        }
+
+        console.log(`Searching for Chrome in: ${cacheDir}`);
+
+        // Helper function to find Chrome executable in directory
+        const findChromeExecutable = (dir: string): string | undefined => {
+            if (!fs.existsSync(dir)) return undefined;
+
+            try {
+                const entries = fs.readdirSync(dir, { withFileTypes: true });
+                const versionDirs = entries
+                    .filter(entry => entry.isDirectory() && /^(linux|mac_arm|mac|win)-/.test(entry.name))
+                    .map(entry => entry.name)
+                    .sort((a, b) => b.localeCompare(a)); // Sort descending for latest version
+
+                for (const versionDir of versionDirs) {
+                    const versionPath = path.join(dir, versionDir);
+                    const possiblePaths = [
+                        path.join(versionPath, 'chrome-linux64', 'chrome'),
+                        path.join(versionPath, 'chrome-mac', 'Chromium.app', 'Contents', 'MacOS', 'Chromium'),
+                        path.join(versionPath, 'chrome-win', 'chrome.exe'),
+                        path.join(versionPath, 'chrome-headless-shell-mac-arm64', 'chrome-headless-shell'),
+                        path.join(versionPath, 'chrome-headless-shell-linux', 'chrome-headless-shell'),
+                        path.join(versionPath, 'chrome-headless-shell-win', 'chrome-headless-shell.exe'),
+                    ];
+
+                    for (const possiblePath of possiblePaths) {
+                        if (fs.existsSync(possiblePath)) {
+                            return possiblePath;
+                        }
+                    }
+                }
+            } catch (error) {
+                console.warn(`Error scanning ${dir}:`, error);
+            }
+
+            return undefined;
+        };
+
+        // Try to find Chrome in cache directory
+        chromePath = findChromeExecutable(path.join(cacheDir, 'chrome'));
+        if (chromePath) {
+            console.log(`Using Chrome at: ${chromePath}`);
+        } else {
+            // Try to find Chrome-headless-shell in cache directory
+            chromePath = findChromeExecutable(path.join(cacheDir, 'chrome-headless-shell'));
+            if (chromePath) {
+                console.log(`Using Chrome-headless-shell at: ${chromePath}`);
+            }
+        }
+
+        // Final fallback: try system Chrome
+        if (!chromePath) {
+            const systemPaths = [
+                '/usr/bin/google-chrome',
+                '/usr/bin/chromium',
+                '/usr/bin/chromium-browser',
+                '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+                '/Applications/Chromium.app/Contents/MacOS/Chromium',
+            ];
+            for (const sysPath of systemPaths) {
+                if (fs.existsSync(sysPath)) {
+                    chromePath = sysPath;
+                    console.log(`Using system Chrome at: ${chromePath}`);
+                    break;
+                }
+            }
+        }
+
+        if (!chromePath) {
+            // List cache contents for debugging
+            try {
+                if (fs.existsSync(cacheDir)) {
+                    console.log(`Cache directory contents (${cacheDir}):`);
+                    const cacheContents = fs.readdirSync(cacheDir, { recursive: true });
+                    cacheContents.slice(0, 20).forEach(item => console.log(`  ${item}`));
+                }
+            } catch (error) {
+                console.warn('Could not list cache contents:', error);
+            }
+            throw new Error('Chrome executable not found. Please install with: bunx puppeteer browsers install chrome or bunx puppeteer browsers install chrome-headless-shell');
+        }
+
+        this.browser = await puppeteer.launch({
+            headless: true,
+            args: [
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--disable-software-rasterizer"
+            ],
+            executablePath: chromePath,
+        });
+
+        return this.browser;
     }
 
-    private isValidHttpLink(link: string): boolean {
-        return /^https?:\/\/[^\s/$.?#].[^\s]*$/i.test(link);
-    }
-
-    private sanitizeFileName(name: string): string {
-        return name.replace(/[:/\\?%*"|<>]/g, "-").replace(/\s+/g, " ").trim();
-    }
-
-    private async processSingleLink(
+    private async processSingleLinkWithPuppeteer(
         link: string,
         browser: Browser,
-        returnMarkdown: boolean
-    ): Promise<{ updatedLink: string; markdown?: string }> {
+        returnMarkdown: boolean,
+        saveToDisk: boolean
+    ): Promise<{ updatedLink: string; markdown?: string; frontmatter?: any; body?: string }> {
         const line = link.trim();
 
-        if (line.startsWith("- [x]")) {
-            console.log(`Skipping! already processed: ${line}`);
+        if (LinkUtils.isProcessed(line)) {
+            Logger.debug(`Skipping! already processed: ${line}`);
             return { updatedLink: line, markdown: returnMarkdown ? "" : undefined };
         }
 
-        const task = this.sanitizeLink(line);
-        if (!this.isValidHttpLink(task)) {
-            console.log(`Skipping! non-URL task: ${task}`);
+        const task = LinkUtils.sanitizeLink(line);
+        if (!LinkUtils.isValidHttpLink(task)) {
+            Logger.debug(`Skipping! non-URL task: ${task}`);
             return { updatedLink: line, markdown: returnMarkdown ? "" : undefined };
         }
 
         try {
-            console.log(`Processing link: ${task}`);
+            Logger.info(`Processing link (Puppeteer): ${task}`);
             const page: Page = await browser.newPage();
 
             await page.goto(task, { waitUntil: "domcontentloaded", timeout: 30000 });
@@ -65,183 +185,214 @@ export class LinkProcessor {
             }
 
             // Fix relative image paths to absolute
-            result.content = result.content.replace(
-                /!\[([^\]]*)\]\((?!https?:\/\/)([^)]*)\)/g,
-                (match, alt, path) => {
-                    try {
-                        const resolved = new URL(path, pageData.url).href;
-                        return `![${alt}](${resolved})`;
-                    } catch {
-                        return match;
-                    }
-                }
-            );
+            result.content = FileUtils.fixImagePaths(result.content, pageData.url);
 
-            const fileName = this.sanitizeFileName(result.title || "Untitled") + ".md";
-
-            // Build Obsidian-compatible frontmatter
-            const today = new Date().toISOString().split("T")[0];
-            const frontmatter = {
+            const frontmatterObj = {
                 title: result.title || "Untitled",
                 source: result.domain ? `https://${result.domain}` : pageData.url,
                 url: pageData.url,
                 author: result.author || "",
                 published: result.published || "",
-                clipped: today,
+                clipped: new Date().toISOString().split("T")[0],
                 tags: ["clippings"],
                 description: result.description || "",
                 image: result.image || "",
                 favicon: result.favicon || "",
             };
 
-            // Create YAML frontmatter
-            const yaml = Object.entries(frontmatter)
-                .map(([key, value]) => {
-                    if (Array.isArray(value)) {
-                        return `${key}:\n${value.map((v) => `  - ${v}`).join("\n")}`;
-                    }
-                    if (typeof value === "string") {
-                        return `${key}: "${value.replace(/"/g, '\\"')}"`;
-                    }
-                    return `${key}: ${value}`;
-                })
-                .join("\n");
+            const fileContent = this.buildFileContent(result, pageData.url);
+            const fileName = LinkUtils.sanitizeFileName(result.title || "Untitled") + ".md";
+            let filePath = "";
 
-            // Combine frontmatter and content
-            const fileContent = `---\n${yaml}\n---\n# ${result.title || "Untitled"}\n\n${result.content}`;
-
-            if (!returnMarkdown) {
-                const filePath = join(this.config.getClippingPath(), fileName);
+            if (saveToDisk) {
+                filePath = join(this.config.getClippingPath(), fileName);
                 const dir = dirname(filePath);
                 if (!existsSync(dir)) {
                     mkdirSync(dir, { recursive: true });
                 }
                 writeFileSync(filePath, fileContent, "utf-8");
-                console.log(`✓ Saved: ${fileName}`);
+                Logger.success(`Saved: ${filePath}`);
+            } else {
+                Logger.info(`Would save to: ${fileName}`);
             }
 
             await page.close();
 
             return {
-                updatedLink: `- [x] ${task}`,
+                updatedLink: LinkUtils.markAsProcessed(task),
                 markdown: returnMarkdown ? fileContent : undefined,
+                frontmatter: frontmatterObj,
+                body: result.content
             };
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            console.error(`Failed to process link: ${task}. Error: ${errorMessage}`);
+            Logger.error(`Failed to process link: ${task}. Error: ${errorMessage}`);
             return { updatedLink: line, markdown: returnMarkdown ? "" : undefined };
         }
     }
 
+    private async processSingleLinkWithFetch(
+        link: string,
+        returnMarkdown: boolean,
+        saveToDisk: boolean
+    ): Promise<{ updatedLink: string; markdown?: string; frontmatter?: any; body?: string }> {
+        const line = link.trim();
+
+        if (LinkUtils.isProcessed(line)) {
+            Logger.debug(`Skipping! already processed: ${line}`);
+            return { updatedLink: line, markdown: returnMarkdown ? "" : undefined };
+        }
+
+        const task = LinkUtils.sanitizeLink(line);
+        if (!LinkUtils.isValidHttpLink(task)) {
+            Logger.debug(`Skipping! non-URL task: ${task}`);
+            return { updatedLink: line, markdown: returnMarkdown ? "" : undefined };
+        }
+
+        try {
+            Logger.info(`Processing link (JSDOM): ${task}`);
+            const response = await fetch(task);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const html = await response.text();
+
+            // Parse with Defuddle (used by official obsidian-clipper)
+            const dom = new JSDOM(html, { url: task });
+            const result = await Defuddle(dom, task, {
+                markdown: true,
+                debug: false,
+            });
+
+            if (!result.content) {
+                throw new Error("Failed to extract article content");
+            }
+
+            // Fix relative image paths to absolute
+            result.content = FileUtils.fixImagePaths(result.content, task);
+
+            const frontmatterObj = {
+                title: result.title || "Untitled",
+                source: result.domain ? `https://${result.domain}` : task,
+                url: task,
+                author: result.author || "",
+                published: result.published || "",
+                clipped: new Date().toISOString().split("T")[0],
+                tags: ["clippings"],
+                description: result.description || "",
+                image: result.image || "",
+                favicon: result.favicon || "",
+            };
+
+            const fileContent = this.buildFileContent(result, task);
+            const fileName = LinkUtils.sanitizeFileName(result.title || "Untitled") + ".md";
+            let filePath = "";
+
+            if (saveToDisk) {
+                filePath = join(this.config.getClippingPath(), fileName);
+                const dir = dirname(filePath);
+                if (!existsSync(dir)) {
+                    mkdirSync(dir, { recursive: true });
+                }
+                writeFileSync(filePath, fileContent, "utf-8");
+                Logger.success(`Saved: ${filePath}`);
+            } else {
+                Logger.info(`Would save to: ${fileName}`);
+            }
+
+            return {
+                updatedLink: LinkUtils.markAsProcessed(task),
+                markdown: returnMarkdown ? fileContent : undefined,
+                frontmatter: frontmatterObj,
+                body: result.content
+            };
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            Logger.error(`Failed to process link: ${task}. Error: ${errorMessage}`);
+            return { updatedLink: line, markdown: returnMarkdown ? "" : undefined };
+        }
+    }
+
+    private buildFileContent(result: any, url: string): string {
+        return FileUtils.buildMarkdownContent(
+            result.title,
+            url,
+            result.domain,
+            result.author,
+            result.published,
+            result.description,
+            result.image,
+            result.favicon,
+            result.content
+        );
+    }
+
     async processLinks(
         links: string[],
-        returnMarkdown: boolean = false
-    ): Promise<ProcessResult | string[]> {
-        console.log(`Clippings will be saved to: ${this.config.getClippingPath()}`);
+        returnFormat?: ReturnFormat,
+        parser?: Parser,
+        saveToDisk?: boolean
+    ): Promise<ProcessResult | string[] | any[]> {
+        const finalReturnFormat = returnFormat || this.config.returnFormat;
+        const finalParser = parser || this.config.parser;
+        const finalSaveToDisk = saveToDisk !== undefined ? saveToDisk : this.config.saveToDisk;
 
-        // Set Puppeteer cache directory for Render.com
-        process.env.PUPPETEER_CACHE_DIR = process.env.PUPPETEER_CACHE_DIR || '/opt/render/.cache/puppeteer';
-
-        // Find the installed Chrome executable
-        const fs = await import('fs');
-        const path = await import('path');
-        const cacheDir = process.env.PUPPETEER_CACHE_DIR;
-        let chromePath: string | undefined;
-
-        // First, try the exact known path from previous installation
-        const knownPath = '/opt/render/.cache/puppeteer/chrome/linux-144.0.7559.96/chrome-linux64/chrome';
-        if (fs.existsSync(knownPath)) {
-            chromePath = knownPath;
-            console.log(`Using known Chrome path: ${chromePath}`);
-        } else {
-            console.log(`Known path not found: ${knownPath}`);
-
-            // Fallback: scan the cache directory
-            try {
-                const chromeDir = path.join(cacheDir, 'chrome');
-                console.log(`Scanning for Chrome in: ${chromeDir}`);
-
-                if (fs.existsSync(chromeDir)) {
-                    const entries = fs.readdirSync(chromeDir, { withFileTypes: true });
-                    const linuxVersions = entries
-                        .filter(entry => entry.isDirectory() && entry.name.startsWith('linux-'))
-                        .map(entry => entry.name)
-                        .sort((a, b) => b.localeCompare(a)); // Sort descending for latest version
-
-                    console.log(`Found Linux Chrome versions: ${linuxVersions.join(', ')}`);
-
-                    if (linuxVersions.length > 0) {
-                        const latestVersion = linuxVersions[0];
-                        const potentialPath = path.join(chromeDir, latestVersion, 'chrome-linux64', 'chrome');
-                        if (fs.existsSync(potentialPath)) {
-                            chromePath = potentialPath;
-                            console.log(`Using detected Chrome at: ${chromePath}`);
-                        } else {
-                            console.log(`Chrome executable not found at: ${potentialPath}`);
-                        }
-                    }
-                } else {
-                    console.log(`Chrome cache directory not found: ${chromeDir}`);
-                }
-            } catch (error) {
-                console.warn('Error scanning for Chrome:', error);
-            }
+        if (finalSaveToDisk) {
+            Logger.info(`Clippings will be saved to: ${this.config.getClippingPath()}`);
         }
-
-        // Final fallback: try system Chrome
-        if (!chromePath) {
-            const systemPaths = ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'];
-            for (const sysPath of systemPaths) {
-                if (fs.existsSync(sysPath)) {
-                    chromePath = sysPath;
-                    console.log(`Using system Chrome at: ${chromePath}`);
-                    break;
-                }
-            }
-        }
-
-        if (!chromePath) {
-            // List all files in cache directory for debugging
-            try {
-                console.log('Cache directory contents:');
-                const cacheContents = fs.readdirSync(cacheDir, { recursive: true });
-                cacheContents.slice(0, 20).forEach(item => console.log(`  ${item}`)); // Limit output
-            } catch (error) {
-                console.warn('Could not list cache contents:', error);
-            }
-            throw new Error('Chrome executable not found. Please ensure Chrome is installed with: npx puppeteer browsers install chrome');
-        }
-
-        const browser: Browser = await puppeteer.launch({
-            headless: true,
-            args: [
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-                "--disable-software-rasterizer"
-            ],
-            executablePath: chromePath,
-        });
+        Logger.info(`Using parser: ${finalParser}`);
+        Logger.info(`Return format: ${finalReturnFormat}`);
+        Logger.info(`Save to disk: ${finalSaveToDisk}`);
 
         const updatedLinks: string[] = [];
         const markdownResults: string[] = [];
+        const jsonResults: any[] = [];
+        const returnMarkdown = finalReturnFormat === "md";
 
-        try {
+        if (finalParser === "puppeteer") {
+            const browser = await this.initializePuppeteer();
+
+            try {
+                for (const link of links) {
+                    const result = await this.processSingleLinkWithPuppeteer(link, browser, returnMarkdown, finalSaveToDisk);
+                    updatedLinks.push(result.updatedLink);
+                    if (returnMarkdown && result.markdown !== undefined) {
+                        markdownResults.push(result.markdown);
+                    }
+                    if (!returnMarkdown && result.frontmatter && result.body) {
+                        jsonResults.push({
+                            url: link,
+                            frontmatter: result.frontmatter,
+                            body: result.body
+                        });
+                    }
+                }
+            } finally {
+                if (this.browser) {
+                    await this.browser.close();
+                    this.browser = null;
+                }
+                Logger.info("All links processed.");
+            }
+        } else {
+            // Use JSDOM mode
             for (const link of links) {
-                const result = await this.processSingleLink(link, browser, returnMarkdown);
+                const result = await this.processSingleLinkWithFetch(link, returnMarkdown, finalSaveToDisk);
                 updatedLinks.push(result.updatedLink);
                 if (returnMarkdown && result.markdown !== undefined) {
                     markdownResults.push(result.markdown);
                 }
+                if (!returnMarkdown && result.frontmatter && result.body) {
+                    jsonResults.push({
+                        url: link,
+                        frontmatter: result.frontmatter,
+                        body: result.body
+                    });
+                }
             }
-        } finally {
-            await browser.close();
-            console.log("All links processed.");
+            Logger.info("All links processed.");
         }
 
         return returnMarkdown
             ? { updatedLinks, markdown: markdownResults }
-            : updatedLinks;
+            : jsonResults.length > 0 ? jsonResults : updatedLinks;
     }
 }

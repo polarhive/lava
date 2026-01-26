@@ -1,6 +1,7 @@
 import { LinkProcessor } from "./processor";
-import { ConfigManager } from "./config";
+import { ConfigManager, Parser, ReturnFormat } from "./config";
 import { ProcessResult } from "./types";
+import { Logger } from "./utils";
 
 export class LavaServer {
     private processor: LinkProcessor;
@@ -27,7 +28,13 @@ export class LavaServer {
                             });
                         }
 
-                        const { links, returnMarkdown = false } = JSON.parse(body);
+                        const {
+                            links,
+                            returnFormat,
+                            parser,
+                            saveToDisk
+                        } = JSON.parse(body);
+
                         if (!Array.isArray(links)) {
                             return new Response(JSON.stringify({ error: 'links must be an array' }), {
                                 status: 400,
@@ -35,22 +42,36 @@ export class LavaServer {
                             });
                         }
 
-                        const result = await self.processor.processLinks(links, returnMarkdown);
+                        // Use config defaults or request overrides
+                        const finalParser: Parser = parser === "jsdom" || parser === "puppeteer"
+                            ? parser
+                            : self.config.parser;
+                        const finalReturnFormat: ReturnFormat = returnFormat === "md" || returnFormat === "json"
+                            ? returnFormat
+                            : self.config.returnFormat;
+                        const finalSaveToDisk = saveToDisk !== undefined ? saveToDisk : self.config.saveToDisk;
 
-                        if (returnMarkdown && links.length === 1) {
-                            // For single link with returnMarkdown, return raw markdown
+                        const result = await self.processor.processLinks(
+                            links,
+                            finalReturnFormat,
+                            finalParser,
+                            finalSaveToDisk
+                        );
+
+                        if (finalReturnFormat === "md" && links.length === 1) {
+                            // For single link with markdown format, return raw markdown
                             const processResult = result as ProcessResult;
                             return new Response(processResult.markdown?.[0] || "", {
                                 headers: { 'Content-Type': 'text/markdown' }
                             });
                         } else {
-                            // For multiple links or without returnMarkdown, return JSON
+                            // Return JSON
                             return new Response(JSON.stringify(result), {
                                 headers: { 'Content-Type': 'application/json' }
                             });
                         }
                     } catch (error) {
-                        console.error('API Error:', error);
+                        Logger.error(`API Error: ${error instanceof Error ? error.message : String(error)}`);
                         const errorMessage = error instanceof Error ? error.message : 'Invalid JSON';
                         return new Response(JSON.stringify({ error: errorMessage }), {
                             status: 400,
@@ -59,7 +80,7 @@ export class LavaServer {
                     }
                 }
 
-                return new Response('Lava Server - POST /api with { links: [...], returnMarkdown?: boolean }', {
+                return new Response('Lava Server - POST /api with { links: string[], returnFormat?: "md" | "json", parser?: "puppeteer" | "jsdom", saveToDisk?: boolean }', {
                     headers: { 'Content-Type': 'text/plain' }
                 });
             },
