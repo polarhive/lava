@@ -71,6 +71,65 @@ export class LinkUtils {
     }
 
     /**
+     * Detect if a YouTube URL is a channel (not a single video).
+     * Recognizes paths like /channel/, /c/, /user/, or handles starting with '@'.
+     */
+    static isYouTubeChannel(link: string): boolean {
+        try {
+            const url = new URL(link);
+            const host = url.hostname.toLowerCase();
+            if (!(host === 'youtu.be' || host.endsWith('youtube.com'))) return false;
+            const pathParts = url.pathname.split('/').filter(Boolean);
+            if (pathParts.length === 0) return false;
+            const first = pathParts[0].toLowerCase();
+            if (first === 'channel' || first === 'c' || first === 'user') return true;
+            // handle /@handle or segments starting with '@'
+            if (url.pathname.startsWith('/@') || pathParts.some(seg => seg.startsWith('@'))) return true;
+            // If URL has no 'v' param and doesn't look like embed/shorts/watch, consider it a channel/landing page
+            if (!url.searchParams.has('v') && first !== 'watch' && first !== 'embed' && first !== 'shorts') {
+                // But youtu.be is always a video short link
+                if (host === 'youtu.be') return false;
+                return false;
+            }
+            return false;
+        } catch {
+            return false;
+        }
+    }
+
+    /**
+     * Build the canonical YouTube watch URL for a given video id or link.
+     * Ensures consistent redirects for thumbnails and embeds.
+     */
+    static canonicalizeYouTubeUrl(link: string, id?: string): string {
+        try {
+            if (id) {
+                return `https://www.youtube.com/watch?v=${id}`;
+            }
+            const url = new URL(link);
+            // If 'v' param present, use it
+            if (url.searchParams.has('v')) {
+                return `https://www.youtube.com/watch?v=${url.searchParams.get('v')}`;
+            }
+            // youtu.be short link
+            if (url.hostname.toLowerCase() === 'youtu.be') {
+                const pid = url.pathname.split('/').filter(Boolean)[0];
+                if (pid) return `https://www.youtube.com/watch?v=${pid}`;
+            }
+            // /embed/<id> or /shorts/<id>
+            const pathParts = url.pathname.split('/').filter(Boolean);
+            if (pathParts[0] === 'embed' || pathParts[0] === 'shorts') {
+                const pid = pathParts[1];
+                if (pid) return `https://www.youtube.com/watch?v=${pid}`;
+            }
+            // Fallback to original link
+            return link;
+        } catch {
+            return link;
+        }
+    }
+
+    /**
      * Validate if a string is a valid HTTP(S) URL
      */
     static isValidHttpLink(link: string): boolean {
@@ -254,11 +313,27 @@ export class FileUtils {
      * Fix relative image paths to absolute URLs
      */
     static fixImagePaths(content: string, baseUrl: string): string {
+        // Normalize baseUrl so that relative paths resolve against the directory when appropriate.
+        // If the base path doesn't end with '/' and the last path segment doesn't look like a filename (no dot),
+        // append a trailing slash so resolving 'wiki.png' against 'https://site/foo/bar' yields
+        // 'https://site/foo/bar/wiki.png' instead of 'https://site/foo/wiki.png'.
+        let normalizedBase = baseUrl;
+        try {
+            const urlObj = new URL(baseUrl);
+            const lastSegment = urlObj.pathname.split('/').filter(Boolean).pop() || '';
+            if (!urlObj.pathname.endsWith('/') && lastSegment && !lastSegment.includes('.')) {
+                urlObj.pathname = urlObj.pathname + '/';
+                normalizedBase = urlObj.href;
+            }
+        } catch {
+            // If parsing fails, fall back to the original baseUrl
+        }
+
         return content.replace(
             /!\[([^\]]*)\]\((?!https?:\/\/)([^)]*)\)/g,
             (match, alt, path) => {
                 try {
-                    const resolved = new URL(path, baseUrl).href;
+                    const resolved = new URL(path, normalizedBase).href;
                     return `![${alt}](${resolved})`;
                 } catch {
                     return match;
@@ -316,6 +391,7 @@ export class FileUtils {
      */
     static buildYouTubeEmbed(title: string, url: string, id: string): { frontmatter: string; frontmatterObj: Record<string, any>; content: string; body: string; title: string } {
         const safeTitle = title || "YouTube Video";
+        const canonicalUrl = LinkUtils.canonicalizeYouTubeUrl(url, id);
 
         // Use the video thumbnail as the frontmatter image so clients can present a preview
         const thumbnailUrl = `https://img.youtube.com/vi/${id}/hqdefault.jpg`;
@@ -323,7 +399,7 @@ export class FileUtils {
         const frontmatterObj = {
             title: safeTitle,
             source: "https://youtube.com",
-            url,
+            url: canonicalUrl,
             clipped: new Date().toISOString().split("T")[0],
             tags: ["clippings", "youtube"],
             image: thumbnailUrl,
@@ -340,8 +416,8 @@ export class FileUtils {
             ""
         );
 
-        // For YouTube, produce a simple markdown image link pointing to the video (no iframe or thumbnail)
-        const body = `![${safeTitle}](${url})`;
+        // For YouTube, produce a simple markdown image link pointing to the canonical watch URL (no iframe or thumbnail)
+        const body = `![${safeTitle}](${canonicalUrl})`;
 
         // 'content' remains the full markdown used when saving to disk
         const content = `---\n${frontmatter}\n---\n# ${safeTitle}\n\n${body}`;

@@ -164,10 +164,12 @@ export class LinkProcessor {
         }
 
         const youtubeId = LinkUtils.getYouTubeId(task);
-        if (youtubeId) {
-            Logger.info(`Embedding YouTube link: ${task}`);
-            const ytTitle = await FileUtils.fetchYouTubeTitle(task);
-            const embed = FileUtils.buildYouTubeEmbed(ytTitle || "", task, youtubeId);
+        const isChannel = LinkUtils.isYouTubeChannel(task);
+        if (youtubeId && !isChannel) {
+            const canonical = LinkUtils.canonicalizeYouTubeUrl(task, youtubeId);
+            Logger.info(`Embedding YouTube link: ${canonical}`);
+            const ytTitle = await FileUtils.fetchYouTubeTitle(canonical);
+            const embed = FileUtils.buildYouTubeEmbed(ytTitle || "", canonical, youtubeId);
             const fileName = LinkUtils.sanitizeFileName(embed.title || `YouTube_${youtubeId}`) + ".md";
             let filePath = "";
 
@@ -184,7 +186,7 @@ export class LinkProcessor {
             }
 
             return {
-                updatedLink: LinkUtils.markAsProcessed(task),
+                updatedLink: LinkUtils.markAsProcessed(canonical),
                 markdown: returnMarkdown ? embed.content : undefined,
                 frontmatter: embed.frontmatterObj,
                 body: embed.body
@@ -319,10 +321,12 @@ export class LinkProcessor {
         }
 
         const youtubeId = LinkUtils.getYouTubeId(task);
-        if (youtubeId) {
-            Logger.info(`Embedding YouTube link: ${task}`);
-            const ytTitle = await FileUtils.fetchYouTubeTitle(task);
-            const embed = FileUtils.buildYouTubeEmbed(ytTitle || "", task, youtubeId);
+        const isChannel = LinkUtils.isYouTubeChannel(task);
+        if (youtubeId && !isChannel) {
+            const canonical = LinkUtils.canonicalizeYouTubeUrl(task, youtubeId);
+            Logger.info(`Embedding YouTube link: ${canonical}`);
+            const ytTitle = await FileUtils.fetchYouTubeTitle(canonical);
+            const embed = FileUtils.buildYouTubeEmbed(ytTitle || "", canonical, youtubeId);
             const fileName = LinkUtils.sanitizeFileName(embed.title || `YouTube_${youtubeId}`) + ".md";
             let filePath = "";
 
@@ -339,7 +343,7 @@ export class LinkProcessor {
             }
 
             return {
-                updatedLink: LinkUtils.markAsProcessed(task),
+                updatedLink: LinkUtils.markAsProcessed(canonical),
                 markdown: returnMarkdown ? embed.content : undefined,
                 frontmatter: embed.frontmatterObj,
                 body: embed.body
@@ -524,14 +528,16 @@ export class LinkProcessor {
                 }
 
                 const youtubeId = LinkUtils.getYouTubeId(task);
-                if (youtubeId) {
+                const isChannel = LinkUtils.isYouTubeChannel(task);
+                if (youtubeId && !isChannel) {
+                    const canonical = LinkUtils.canonicalizeYouTubeUrl(task, youtubeId);
                     if (total > 1) {
-                        Logger.info(`${idx}/${total} Embedding YouTube: ${task}`);
+                        Logger.info(`${idx}/${total} Embedding YouTube: ${canonical}`);
                     } else {
-                        Logger.info(`Embedding YouTube: ${task}`);
+                        Logger.info(`Embedding YouTube: ${canonical}`);
                     }
-                    const ytTitle = await FileUtils.fetchYouTubeTitle(task);
-                    const embed = FileUtils.buildYouTubeEmbed(ytTitle || "", task, youtubeId);
+                    const ytTitle = await FileUtils.fetchYouTubeTitle(canonical);
+                    const embed = FileUtils.buildYouTubeEmbed(ytTitle || "", canonical, youtubeId);
                     const fileName = LinkUtils.sanitizeFileName(embed.title || `YouTube_${youtubeId}`) + ".md";
 
                     if (finalSaveToDisk) {
@@ -546,7 +552,7 @@ export class LinkProcessor {
                         Logger.debug(`Would save to: ${fileName}`);
                     }
 
-                    updatedLinks.push(LinkUtils.markAsProcessed(task));
+                    updatedLinks.push(LinkUtils.markAsProcessed(canonical));
                     if (onLinkProcessed) onLinkProcessed(updatedLinks.length - 1, updatedLinks[updatedLinks.length - 1]);
                     if (returnMarkdown) {
                         markdownResults.push(embed.content);
