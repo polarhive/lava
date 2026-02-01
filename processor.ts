@@ -187,7 +187,7 @@ export class LinkProcessor {
                 updatedLink: LinkUtils.markAsProcessed(task),
                 markdown: returnMarkdown ? embed.content : undefined,
                 frontmatter: embed.frontmatterObj,
-                body: embed.content
+                body: embed.body
             };
         }
 
@@ -342,7 +342,7 @@ export class LinkProcessor {
                 updatedLink: LinkUtils.markAsProcessed(task),
                 markdown: returnMarkdown ? embed.content : undefined,
                 frontmatter: embed.frontmatterObj,
-                body: embed.content
+                body: embed.body
             };
         }
 
@@ -551,7 +551,7 @@ export class LinkProcessor {
                     if (returnMarkdown) {
                         markdownResults.push(embed.content);
                     } else {
-                        jsonResults.push({ url: link, frontmatter: embed.frontmatterObj, body: embed.content });
+                        jsonResults.push({ url: link, frontmatter: embed.frontmatterObj, body: embed.body });
                     }
                     continue;
                 }

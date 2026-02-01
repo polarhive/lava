@@ -51,6 +51,7 @@ Paths can be absolute or relative to the current working directory.
 **JSON** (default)
 - Returns structured data with `updatedLinks` array
 - Useful for automation
+- **YouTube links**: the `body` will be a simple markdown image link of the form `![title](video_url)` (no iframe or thumbnail)
 
 **Markdown**
 - Returns raw markdown content

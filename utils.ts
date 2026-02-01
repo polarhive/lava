@@ -314,9 +314,11 @@ export class FileUtils {
     /**
      * Build a simple YouTube embed markdown block
      */
-    static buildYouTubeEmbed(title: string, url: string, id: string): { frontmatter: string; frontmatterObj: Record<string, any>; content: string; title: string } {
+    static buildYouTubeEmbed(title: string, url: string, id: string): { frontmatter: string; frontmatterObj: Record<string, any>; content: string; body: string; title: string } {
         const safeTitle = title || "YouTube Video";
-        const embedUrl = `https://www.youtube.com/embed/${id}`;
+
+        // Use the video thumbnail as the frontmatter image so clients can present a preview
+        const thumbnailUrl = `https://img.youtube.com/vi/${id}/hqdefault.jpg`;
 
         const frontmatterObj = {
             title: safeTitle,
@@ -324,6 +326,7 @@ export class FileUtils {
             url,
             clipped: new Date().toISOString().split("T")[0],
             tags: ["clippings", "youtube"],
+            image: thumbnailUrl,
         };
 
         const frontmatter = this.buildFrontmatter(
@@ -333,14 +336,16 @@ export class FileUtils {
             "",
             "",
             "",
-            "",
+            thumbnailUrl,
             ""
         );
 
-        const body = `<iframe width="560" height="315" src="${embedUrl}" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>\n\n[Watch on YouTube](${url})`;
+        // For YouTube, produce a simple markdown image link pointing to the video (no iframe or thumbnail)
+        const body = `![${safeTitle}](${url})`;
 
+        // 'content' remains the full markdown used when saving to disk
         const content = `---\n${frontmatter}\n---\n# ${safeTitle}\n\n${body}`;
 
-        return { frontmatter, frontmatterObj, content, title: safeTitle };
+        return { frontmatter, frontmatterObj, content, body, title: safeTitle };
     }
 }
