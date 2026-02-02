@@ -58,8 +58,8 @@ export class LinkUtils {
                     return url.searchParams.get("v");
                 }
                 const pathParts = url.pathname.split("/").filter(Boolean);
-                // Handle /embed/<id> or /shorts/<id>
-                if (pathParts[0] === "embed" || pathParts[0] === "shorts") {
+                // Handle /embed/<id>, /shorts/<id>, or /live/<id>
+                if (pathParts[0] === "embed" || pathParts[0] === "shorts" || pathParts[0] === "live") {
                     return pathParts[1] || null;
                 }
             }
@@ -85,8 +85,8 @@ export class LinkUtils {
             if (first === 'channel' || first === 'c' || first === 'user') return true;
             // handle /@handle or segments starting with '@'
             if (url.pathname.startsWith('/@') || pathParts.some(seg => seg.startsWith('@'))) return true;
-            // If URL has no 'v' param and doesn't look like embed/shorts/watch, consider it a channel/landing page
-            if (!url.searchParams.has('v') && first !== 'watch' && first !== 'embed' && first !== 'shorts') {
+            // If URL has no 'v' param and doesn't look like embed/shorts/watch/live, consider it a channel/landing page
+            if (!url.searchParams.has('v') && first !== 'watch' && first !== 'embed' && first !== 'shorts' && first !== 'live') {
                 // But youtu.be is always a video short link
                 if (host === 'youtu.be') return false;
                 return false;
@@ -116,9 +116,9 @@ export class LinkUtils {
                 const pid = url.pathname.split('/').filter(Boolean)[0];
                 if (pid) return `https://www.youtube.com/watch?v=${pid}`;
             }
-            // /embed/<id> or /shorts/<id>
+            // /embed/<id>, /shorts/<id>, or /live/<id>
             const pathParts = url.pathname.split('/').filter(Boolean);
-            if (pathParts[0] === 'embed' || pathParts[0] === 'shorts') {
+            if (pathParts[0] === 'embed' || pathParts[0] === 'shorts' || pathParts[0] === 'live') {
                 const pid = pathParts[1];
                 if (pid) return `https://www.youtube.com/watch?v=${pid}`;
             }
