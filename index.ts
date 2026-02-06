@@ -12,6 +12,8 @@ async function main() {
         // Check if daemon mode is requested
         const args = process.argv.slice(2);
         const isDaemonRequested = args.includes('--daemon') || args.includes('-d') || Bun.env.DAEMON === "1";
+        const isPollRequested = args.includes('--poll') || args.includes('-p') || Bun.env.POLL === "1";
+        const pollFile = args.find(arg => arg.startsWith('--file='))?.split('=')[1] || Bun.env.POLL_FILE;
 
         // Check if required daemon env vars are set
         const hasDaemonRequirements = !!Bun.env.CLIPPING_DIR && !!Bun.env.LINKS_FILE;
@@ -21,9 +23,15 @@ async function main() {
             throw new Error("Daemon mode requires CLIPPING_DIR and LINKS_FILE environment variables");
         }
 
-        const isDaemon = isDaemonRequested && hasDaemonRequirements;
+        // If poll mode requested but no file specified, error out
+        if (isPollRequested && !pollFile) {
+            throw new Error("Poll mode requires POLL_FILE environment variable or --file= option");
+        }
 
-        const config = new ConfigManager(isDaemon);
+        const isDaemon = isDaemonRequested && hasDaemonRequirements;
+        const isPoll = isPollRequested && pollFile;
+
+        const config = new ConfigManager(isDaemon || isPoll);
         const processor = new LinkProcessor(config);
 
         if (isDaemon) {
@@ -35,6 +43,12 @@ async function main() {
 
             // Start watching
             watcher.startWatching(processor);
+        } else if (isPoll) {
+            // Poll mode: monitor markdown file for links every 10 seconds
+            const watcher = new FileWatcher(config);
+
+            // Start polling
+            watcher.startPollingMarkdownFile(pollFile, processor);
         } else {
             // Server mode: listen on port 3000
             const server = new LavaServer(processor, config);

@@ -1,7 +1,18 @@
 import { join, isAbsolute } from "path";
 
-export type Parser = "puppeteer" | "jsdom";
-export type ReturnFormat = "md" | "json";
+export type Parser = "jsdom";
+export type ReturnFormat = "md";
+
+function _getEnv(name: string): string | undefined {
+    // Bun provides Bun.env; Node/Electron provides process.env
+    try {
+        // @ts-ignore
+        if (typeof Bun !== 'undefined' && Bun && Bun.env) return Bun.env[name];
+    } catch (e) {
+        // ignore
+    }
+    return process.env[name];
+}
 
 export class ConfigManager {
     private config: {
@@ -13,17 +24,17 @@ export class ConfigManager {
         isDaemonMode: boolean;
     };
 
-    constructor(isDaemonMode: boolean = false) {
-        const parserEnv = (Bun.env.PARSER || "").toLowerCase();
-        const returnFormatEnv = (Bun.env.RETURN_FORMAT || "").toLowerCase();
-        const saveToDiskEnv = (Bun.env.SAVE_TO_DISK || "").toLowerCase();
+    constructor(isDaemonMode: boolean = false, overrides?: Partial<{ clippingDir: string; linksFile: string; parser: Parser; returnFormat: ReturnFormat; saveToDisk: boolean }>) {
+        const parserEnv = ((_getEnv("PARSER") || "") as string).toLowerCase();
+        const returnFormatEnv = ((_getEnv("RETURN_FORMAT") || "") as string).toLowerCase();
+        const saveToDiskEnv = ((_getEnv("SAVE_TO_DISK") || "") as string).toLowerCase();
 
         this.config = {
-            clippingDir: Bun.env.CLIPPING_DIR,
-            linksFile: Bun.env.LINKS_FILE,
-            parser: parserEnv === "jsdom" ? "jsdom" : "puppeteer",
-            returnFormat: returnFormatEnv === "md" ? "md" : "json",
-            saveToDisk: saveToDiskEnv !== "false",
+            clippingDir: overrides?.clippingDir || _getEnv("CLIPPING_DIR"),
+            linksFile: overrides?.linksFile || _getEnv("LINKS_FILE"),
+            parser: (overrides && overrides.parser) ? overrides.parser : (parserEnv === "jsdom" ? "jsdom" : "puppeteer"),
+            returnFormat: (overrides && overrides.returnFormat) ? overrides.returnFormat : (returnFormatEnv === "md"),
+            saveToDisk: overrides && overrides.saveToDisk !== undefined ? overrides.saveToDisk : (saveToDiskEnv !== "false"),
             isDaemonMode,
         };
         this.validate();
