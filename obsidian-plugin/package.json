@@ -1,5 +1,5 @@
 {
-    "name": "obsidian-link-monitor",
+    "name": "lava",
     "version": "1.0.0",
     "description": "Monitor markdown files for links and process them automatically",
     "main": "main.js",

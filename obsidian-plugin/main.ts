@@ -1,30 +1,5 @@
-import { App, Plugin, PluginSettingTab, Setting, TFile, Notice, requestUrl, normalizePath } from 'obsidian';
-
-interface LinkMonitorSettings {
-    linkBookmarkFilePath: string;
-    clippingFolder: string;
-    lavaServerUrl: string;
-    stabilityThresholdSeconds: number;
-    watchDailyNote?: boolean;
-    dailyNotePath: string;
-    dailyNoteFormat: string;
-    blockedDomains: string;
-    defaultTags: string;
-    parserType: string;
-}
-
-const DEFAULT_SETTINGS: LinkMonitorSettings = {
-    linkBookmarkFilePath: 'bookmarks.md',
-    clippingFolder: 'Clippings',
-    lavaServerUrl: 'https://lava-linkstash.onrender.com/api',
-    stabilityThresholdSeconds: 2,
-    watchDailyNote: false,
-    dailyNotePath: 'Daily',
-    dailyNoteFormat: 'YYYY-MM-DD',
-    blockedDomains: 'docs.google.com,sheets.google.com,sites.google.com,drive.google.com',
-    defaultTags: 'clippings',
-    parserType: 'jsdom'
-}
+import { App, Plugin, TFile, Notice, requestUrl, normalizePath } from 'obsidian';
+import { LinkMonitorSettings, DEFAULT_SETTINGS, LinkMonitorSettingTab } from './settings';
 
 export default class LinkMonitorPlugin extends Plugin {
     settings: LinkMonitorSettings;
@@ -46,7 +21,7 @@ export default class LinkMonitorPlugin extends Plugin {
         // Add command to manually trigger processing
         this.addCommand({
             id: 'process-links',
-            name: 'Process Link Bookmark File',
+            name: 'Process link bookmark file',
             callback: () => this.processLinks()
         });
 
@@ -334,13 +309,11 @@ export default class LinkMonitorPlugin extends Plugin {
             }
 
             if (response.status !== 200) {
-                console.error(`lava server returned status ${response.status} for ${url}. textLen=${textLen} jsonPreview=${jsonPreview}`);
                 throw new Error(`lava server returned status ${response.status}`);
             }
 
             const markdown = response.text;
             if (!markdown || markdown.trim() === '') {
-                console.error(`lava server returned empty content for ${url}. textLen=${textLen} jsonPreview=${jsonPreview}`);
                 throw new Error('lava server returned empty content');
             }
 
@@ -375,13 +348,12 @@ export default class LinkMonitorPlugin extends Plugin {
 
             const existingFile = this.app.vault.getAbstractFileByPath(filePath);
             if (existingFile instanceof TFile) {
-                await this.app.vault.modify(existingFile, fixedMarkdown);
+                await this.app.vault.process(existingFile, () => fixedMarkdown);
             } else {
                 await this.app.vault.create(filePath, fixedMarkdown);
             }
             return;
         } catch (error) {
-            console.error(`Failed to process ${url} with lava server:`, error);
             throw error;
         }
     }
@@ -555,7 +527,7 @@ export default class LinkMonitorPlugin extends Plugin {
                 return modified ? lines.join('\n') : content;
             });
         } catch (error) {
-            console.warn('markLinkChecked failed:', error);
+            // Silently fail
         }
     }
 
@@ -571,132 +543,5 @@ export default class LinkMonitorPlugin extends Plugin {
         } catch (e) {
             return false;
         }
-    }
-}
-
-
-
-class LinkMonitorSettingTab extends PluginSettingTab {
-    plugin: LinkMonitorPlugin;
-
-    constructor(app: App, plugin: LinkMonitorPlugin) {
-        super(app, plugin);
-        this.plugin = plugin;
-    }
-
-    display(): void {
-        const { containerEl } = this;
-        containerEl.empty();
-
-        new Setting(containerEl)
-            .setName('Link Bookmark File')
-            .setDesc('Path to the markdown file containing links to monitor and process (relative to vault root)')
-            .addText(text => text
-                .setPlaceholder('bookmarks.md')
-                .setValue(this.plugin.settings.linkBookmarkFilePath)
-                .onChange(async (value) => {
-                    this.plugin.settings.linkBookmarkFilePath = value;
-                    await this.plugin.saveSettings();
-                }));
-
-        new Setting(containerEl)
-            .setName('Processing Delay (seconds)')
-            .setDesc('Delay after file changes before processing links to avoid processing incomplete edits')
-            .addSlider(slider => slider
-                .setLimits(1, 10, 1)
-                .setValue(this.plugin.settings.stabilityThresholdSeconds)
-                .setDynamicTooltip()
-                .onChange(async (value) => {
-                    this.plugin.settings.stabilityThresholdSeconds = value;
-                    await this.plugin.saveSettings();
-                    (this.plugin as any).stabilityThresholdMs = value * 1000;
-                }));
-
-        new Setting(containerEl)
-            .setName('Watch Daily Note')
-            .setDesc('Enable monitoring of today\'s daily note for links in addition to the bookmark file')
-            .addToggle(toggle => toggle
-                .setValue(!!this.plugin.settings.watchDailyNote)
-                .onChange(async (value) => {
-                    this.plugin.settings.watchDailyNote = value;
-                    await this.plugin.saveSettings();
-                }));
-
-        new Setting(containerEl)
-            .setName('Daily Note Path')
-            .setDesc('Folder path where daily notes are stored (leave empty for vault root)')
-            .addText(text => text
-                .setPlaceholder('Daily')
-                .setValue(this.plugin.settings.dailyNotePath)
-                .onChange(async (value) => {
-                    this.plugin.settings.dailyNotePath = value;
-                    await this.plugin.saveSettings();
-                }));
-
-        new Setting(containerEl)
-            .setName('Daily Note Format')
-            .setDesc('Date format template for daily note filenames (use YYYY, MM, DD placeholders)')
-            .addText(text => text
-                .setPlaceholder('YYYY-MM-DD')
-                .setValue(this.plugin.settings.dailyNoteFormat)
-                .onChange(async (value) => {
-                    this.plugin.settings.dailyNoteFormat = value;
-                    await this.plugin.saveSettings();
-                }));
-
-        new Setting(containerEl)
-            .setName('Clipping Folder')
-            .setDesc('Folder where processed link clippings will be saved (created automatically if needed)')
-            .addText(text => text
-                .setPlaceholder('Clippings')
-                .setValue(this.plugin.settings.clippingFolder)
-                .onChange(async (value) => {
-                    this.plugin.settings.clippingFolder = value;
-                    await this.plugin.saveSettings();
-                }));
-
-        new Setting(containerEl)
-            .setName('lava Server URL')
-            .setDesc('URL of the lava server for link processing')
-            .addText(text => text
-                .setPlaceholder('https://lava-linkstash.onrender.com/api')
-                .setValue(this.plugin.settings.lavaServerUrl)
-                .onChange(async (value) => {
-                    this.plugin.settings.lavaServerUrl = value;
-                    await this.plugin.saveSettings();
-                }));
-
-        new Setting(containerEl)
-            .setName('Parser Type')
-            .setDesc('HTML parser to use for web scraping (jsdom)')
-            .addText(text => text
-                .setPlaceholder('jsdom')
-                .setValue(this.plugin.settings.parserType)
-                .onChange(async (value) => {
-                    this.plugin.settings.parserType = value;
-                    await this.plugin.saveSettings();
-                }));
-
-        new Setting(containerEl)
-            .setName('Blocked Domains')
-            .setDesc('Comma-separated list of domains to skip when processing links (e.g., docs.google.com,sheets.google.com)')
-            .addText(text => text
-                .setPlaceholder('docs.google.com,sheets.google.com,sites.google.com,drive.google.com')
-                .setValue(this.plugin.settings.blockedDomains)
-                .onChange(async (value) => {
-                    this.plugin.settings.blockedDomains = value;
-                    await this.plugin.saveSettings();
-                }));
-
-        new Setting(containerEl)
-            .setName('Default Tags')
-            .setDesc('Comma-separated list of tags to add to all clippings (e.g., clippings,web)')
-            .addText(text => text
-                .setPlaceholder('clippings')
-                .setValue(this.plugin.settings.defaultTags)
-                .onChange(async (value) => {
-                    this.plugin.settings.defaultTags = value;
-                    await this.plugin.saveSettings();
-                }));
     }
 }

@@ -2,10 +2,10 @@
     "id": "lava",
     "name": "lava",
     "version": "1.0.0",
-    "minAppVersion": "0.15.0",
-    "description": "Monitor markdown files for links and process them automatically with configurable polling interval",
+    "minAppVersion": "1.0.0",
+    "description": "Extract links from your vault and save them as durable Markdown clippings.",
     "author": "polarhive",
     "authorUrl": "https://polarhive.net",
-    "fundingUrl": "https//buymeacoffee.com/polarhive",
+    "fundingUrl": "https://buymeacoffee.com/polarhive",
     "isDesktopOnly": false
 }

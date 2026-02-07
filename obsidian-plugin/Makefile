@@ -2,7 +2,7 @@
 
 # Configuration
 BUILD_CMD = bun run build
-OBSIDIAN_PLUGIN_DIR = ~/.config/obsidian/wiki/.obsidian/plugins/obsidian-link-monitor/
+OBSIDIAN_PLUGIN_DIR = ~/.config/obsidian/wiki/.obsidian/plugins/lava/
 
 # Default target
 .PHONY: all
